@@ -15,6 +15,11 @@ interface IRWAAssetRegistry {
     function isAssetActive(uint256 assetId) external view returns (bool);
 }
 
+interface IRWARevenueVault {
+    function distributionStarted() external view returns (bool);
+}
+
+
 contract InvestorShareToken is ERC20, AccessControl {
     // =========================
     // Roles
@@ -69,6 +74,15 @@ contract InvestorShareToken is ERC20, AccessControl {
         _grantRole(VAULT_ROLE, _vault);
     }
 
+    modifier supplyUnlocked() {
+        require(
+            !IRWARevenueVault(vault).distributionStarted(),
+            "Supply locked"
+        );
+        _;
+    }
+
+
     // =========================
     // Mint / Burn (Vault only)
     // =========================
@@ -80,6 +94,7 @@ contract InvestorShareToken is ERC20, AccessControl {
     function mint(address to, uint256 amount)
         external
         onlyRole(VAULT_ROLE)
+        supplyUnlocked
     {
         require(totalSupply() + amount <= maxSupply, "Max supply exceeded");
         _mint(to, amount);
@@ -93,6 +108,7 @@ contract InvestorShareToken is ERC20, AccessControl {
     function burn(address from, uint256 amount)
         external
         onlyRole(VAULT_ROLE)
+        supplyUnlocked
     {
         _burn(from, amount);
         emit TokenBurned(from, amount);
