@@ -1,0 +1,7 @@
+.env
+
+node_modules
+dist
+build
+Modular_Architecture_Complete.md
+RWAAssetRegistry_Enhanced.md
