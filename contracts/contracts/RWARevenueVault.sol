@@ -20,7 +20,7 @@ contract RWARevenueVault is AccessControl, ReentrancyGuard {
     bytes32 public constant STRATEGY_ROLE = keccak256("STRATEGY_MANAGER");
     
     IERC20 public paymentToken;       // USDC or other stablecoin
-    ICashflowLogic public logicContract;
+    ICashFlowLogic public logicContract;
     InvestorShareToken public token;  
     IRWAAssetRegistry public registry;
 
@@ -68,7 +68,7 @@ contract RWARevenueVault is AccessControl, ReentrancyGuard {
     ) external {
         require(!initialized, "Already initialized");
         initialized = true;
-        logicContract = ICashflowLogic(_logic);
+        logicContract = ICashFlowLogic(_logic);
         registry = IRWAAssetRegistry(_registry);
         assetId = _assetId;
         feeRecipient = _owner;

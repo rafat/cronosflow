@@ -24,7 +24,7 @@ struct PaymentStatus {
     bool    isPastDue;             // Now > dueDate and not fully paid
 }
 
-interface ICashflowLogic {
+interface ICashFlowLogic {
     /*//////////////////////////////////////////////////////////////
                             INITIALIZATION
     //////////////////////////////////////////////////////////////*/
