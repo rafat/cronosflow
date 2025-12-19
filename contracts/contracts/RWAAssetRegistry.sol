@@ -479,5 +479,15 @@ contract RWAAssetRegistry is AccessControl, Pausable, ReentrancyGuard {
         emit OracleAdded(_oracle);
     }
 
+    /**
+    * @dev Check if asset is currently active.
+    * @param _assetId Asset ID to check.
+    * @return True if asset is active.
+    */
+    function isAssetActive(uint256 _assetId) public view returns (bool) {
+        return assets[_assetId].currentStatus == RWACommonTypes.AssetStatus.ACTIVE;
+    }
+
+
 
  }

@@ -92,9 +92,8 @@ describe("RWARevenueVault + InvestorShareToken", function () {
   describe("Revenue flow", function () {
     it("Deposits revenue into idle balance", async function () {
       const { vault, paymentToken, owner } = await loadFixture(deployFixture);
-
       await paymentToken.approve(vault.target, 1000);
-      await vault.depositRevenue(1000);
+      await vault.depositRevenue(owner.address, 1000);
 
       expect(await vault.getAvailableForDeployment()).to.equal(1000);
     });
@@ -106,9 +105,8 @@ describe("RWARevenueVault + InvestorShareToken", function () {
       // Mint shares
       await vault.mintShares(investor1.address, 100);
 
-      // Deposit revenue
       await paymentToken.approve(vault.target, 1000);
-      await vault.depositRevenue(1000);
+      await vault.depositRevenue(owner.address, 1000);
 
       await vault.commitToDistribution(1000);
 
@@ -123,13 +121,13 @@ describe("RWARevenueVault + InvestorShareToken", function () {
 
   describe("claimYield()", function () {
     it("Allows investor to claim yield once", async function () {
-      const { vault, token, paymentToken, investor1 } =
+      const { vault, token, paymentToken, investor1, owner } =
         await loadFixture(deployFixture);
 
       await vault.mintShares(investor1.address, 100);
 
       await paymentToken.approve(vault.target, 1000);
-      await vault.depositRevenue(1000);
+      await vault.depositRevenue(owner.address, 1000);
       await vault.commitToDistribution(1000);
 
       const expectedReward = 975;
@@ -139,13 +137,13 @@ describe("RWARevenueVault + InvestorShareToken", function () {
     });
 
     it("Prevents double-claiming", async function () {
-      const { vault, token, paymentToken, investor1 } =
+      const { vault, token, paymentToken, investor1, owner } =
         await loadFixture(deployFixture);
 
       await vault.mintShares(investor1.address, 100);
 
       await paymentToken.approve(vault.target, 1000);
-      await vault.depositRevenue(1000);
+      await vault.depositRevenue(owner.address, 1000);
       await vault.commitToDistribution(1000);
 
       await vault.connect(investor1).claimYield();

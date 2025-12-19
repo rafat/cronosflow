@@ -101,14 +101,14 @@ contract RWARevenueVault is AccessControl, ReentrancyGuard {
      * Assumes tokens have been transferred separately (approve first)
      * @param amount USDC received
      */
-    function depositRevenue(uint256 amount) 
-        external 
+    function depositRevenue(address _from, uint256 amount)
+        external
         onlyRole(PAYMENT_ROLE)
         nonReentrant
     {
         require(amount > 0, "Amount must be positive");
         require(
-            paymentToken.transferFrom(msg.sender, address(this), amount),
+            paymentToken.transferFrom(_from, address(this), amount),
             "Transfer failed"
         );
         
