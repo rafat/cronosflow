@@ -6,6 +6,7 @@ library RWACommonTypes {
 
     enum AssetStatus { 
         REGISTERED,
+        LINKED,
         ACTIVE,
         UNDER_REVIEW,
         DEFAULTED,

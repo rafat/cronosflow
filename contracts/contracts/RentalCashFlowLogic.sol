@@ -53,12 +53,19 @@ contract RentalCashFlowLogic is ICashFlowLogic {
     event LeaseInitialized(
         uint256 rentAmount,
         uint256 paymentInterval,
+        uint256 firstPaymentDueDate,
         uint256 gracePeriodDays,
         uint256 leaseEndDate
     );
 
     event RentPaid(uint256 indexed period, uint256 amount, uint256 timestamp);
     event CashflowHealthUpdated(CashflowHealth newHealth);
+
+    address public registry;
+    modifier onlyRegistry() {
+        require(msg.sender == registry, "Only registry");
+        _;
+    }
 
     // =============================================================
     // Initialization
@@ -68,6 +75,7 @@ contract RentalCashFlowLogic is ICashFlowLogic {
      * @dev data = abi.encode(
      *   rentAmount,
      *   paymentIntervalSeconds (e.g. 30 days),
+     *   firstPaymentDueDate,
      *   gracePeriodDays,
      *   leaseEndDate
      * )
@@ -75,24 +83,35 @@ contract RentalCashFlowLogic is ICashFlowLogic {
     function initialize(bytes calldata data) external override {
         require(!initialized, "Already initialized");
 
+        uint256 firstPaymentDueDate;
+
         (
             rentAmount,
             paymentInterval,
+            firstPaymentDueDate,
             gracePeriodDays,
-            leaseEndDate
-        ) = abi.decode(data, (uint256, uint256, uint256, uint256));
+            leaseEndDate,
+            registry
+        ) = abi.decode(data, (uint256, uint256, uint256, uint256, uint256, address));
 
         require(rentAmount > 0, "Invalid rent");
         require(paymentInterval >= 28 days, "Interval too short");
-        require(leaseEndDate > block.timestamp, "Lease already ended");
+        require(registry != address(0), "Invalid registry");
 
-        startTimestamp = block.timestamp;
+        // First due date should not be in the past (or allow slight backdating if you want)
+        require(firstPaymentDueDate + 5 minutes >= block.timestamp, "First due date too far in past");
+
+        // Lease end must be after first due date
+        require(leaseEndDate > firstPaymentDueDate, "Lease end before first due");
+
+        startTimestamp = firstPaymentDueDate; // anchor schedule to first due date
         health = CashflowHealth.PERFORMING;
         initialized = true;
 
         emit LeaseInitialized(
             rentAmount,
             paymentInterval,
+            firstPaymentDueDate,
             gracePeriodDays,
             leaseEndDate
         );
@@ -224,50 +243,75 @@ contract RentalCashFlowLogic is ICashFlowLogic {
     function evaluateDefault(uint256 timestamp)
         external
         override
+        onlyRegistry
         returns (RWACommonTypes.AssetStatus, CashflowHealth)
+    {
+        (
+            RWACommonTypes.AssetStatus newStatus,
+            CashflowHealth newHealth,
+            ,
+            uint256 period
+        ) = this.previewDefault(timestamp);
+
+        CashflowHealth oldHealth = health;
+        health = newHealth;
+
+        // Keep analytics fields consistent with preview computation
+        if (newHealth == CashflowHealth.LATE || newHealth == CashflowHealth.DEFAULTED) {
+            missedPeriods = _countMissedPeriodsUpTo(period, timestamp);
+            lastMissedPeriod = period;
+        }
+
+        if (oldHealth != newHealth) {
+            emit CashflowHealthUpdated(newHealth);
+        }
+
+        return (newStatus, newHealth);
+    }
+
+    function previewDefault(uint256 timestamp)
+        external
+        view
+        override
+        returns (
+            RWACommonTypes.AssetStatus newStatus,
+            CashflowHealth newHealth,
+            uint256 daysPastDue,
+            uint256 period
+        )
     {
         require(initialized, "Not initialized");
 
-        // Lease ended → completed
         if (timestamp >= leaseEndDate) {
-            health = CashflowHealth.COMPLETED;
-            emit CashflowHealthUpdated(health);
-            return (RWACommonTypes.AssetStatus.EXPIRED, health);
+            return (
+                RWACommonTypes.AssetStatus.EXPIRED,
+                CashflowHealth.COMPLETED,
+                0,
+                _periodAt(timestamp)
+            );
         }
 
-        uint256 period = _periodAt(timestamp);
+        period = _periodAt(timestamp);
         uint256 dueDate = _dueDateForPeriod(period);
 
-        // Payment already made for this period → healthy
         if (periodPaid[period]) {
-            health = CashflowHealth.PERFORMING;
-            return (RWACommonTypes.AssetStatus.ACTIVE, health);
+            return (RWACommonTypes.AssetStatus.ACTIVE, CashflowHealth.PERFORMING, 0, period);
         }
 
-        uint256 daysPastDue =
-            timestamp > dueDate ? (timestamp - dueDate) / 1 days : 0;
+        daysPastDue = timestamp > dueDate ? (timestamp - dueDate) / 1 days : 0;
 
-        // Still within grace period
         if (daysPastDue < gracePeriodDays) {
-            health = CashflowHealth.GRACE_PERIOD;
-            emit CashflowHealthUpdated(health);
-            return (RWACommonTypes.AssetStatus.ACTIVE, health);
+            return (RWACommonTypes.AssetStatus.ACTIVE, CashflowHealth.GRACE_PERIOD, daysPastDue, period);
         }
 
-        // ❗ Past grace period: count missed period ONCE
-        if (lastMissedPeriod < period) {
-            lastMissedPeriod = period;
-            missedPeriods += 1;
+        uint256 missed = _countMissedPeriodsUpTo(period, timestamp);
+
+        if (missed >= 2) {
+            return (RWACommonTypes.AssetStatus.DEFAULTED, CashflowHealth.DEFAULTED, daysPastDue, period);
         }
 
-        if (missedPeriods >= 2) {
-            health = CashflowHealth.DEFAULTED;
-        } else {
-            health = CashflowHealth.LATE;
-        }
-
-        emit CashflowHealthUpdated(health);
-        return (getAssetStatus(), health);
+        // missed is >= 1 here (since we're past grace and current period unpaid)
+        return (RWACommonTypes.AssetStatus.ACTIVE, CashflowHealth.LATE, daysPastDue, period);
     }
 
 
@@ -310,5 +354,18 @@ contract RentalCashFlowLogic is ICashFlowLogic {
         returns (uint256)
     {
         return startTimestamp + (period * paymentInterval);
+    }
+
+    function _countMissedPeriodsUpTo(uint256 currentPeriod, uint256 timestamp) internal view returns (uint256 missed) {
+        for (uint256 p = 0; p <= currentPeriod; p++) {
+            if (periodPaid[p]) continue;
+
+            uint256 due = _dueDateForPeriod(p);
+            uint256 daysPastDue = timestamp > due ? (timestamp - due) / 1 days : 0;
+
+            if (daysPastDue >= gracePeriodDays) {
+                missed++;
+            }
+        }
     }
 }

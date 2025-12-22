@@ -4,6 +4,7 @@ pragma solidity ^0.8.20;
 contract MockRegistry {
     bool public active = true;
     bool public paused = false;
+    bool public whitelisted = true;
 
     function isWhitelisted(address) external pure returns (bool) {
         return true;
@@ -23,5 +24,9 @@ contract MockRegistry {
 
     function setPaused(bool v) external {
         paused = v;
+    }
+
+    function setWhitelisted(bool w) external { 
+        whitelisted = w;
     }
 }

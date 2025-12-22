@@ -121,6 +121,20 @@ interface ICashFlowLogic {
         returns (RWACommonTypes.AssetStatus newStatus, CashflowHealth newHealth);
 
     /**
+     * @dev View-only preview of default/health outcome at `timestamp`.
+     * Does not mutate state.
+     */
+    function previewDefault(uint256 timestamp)
+        external
+        view
+        returns (
+            RWACommonTypes.AssetStatus newStatus,
+            CashflowHealth newHealth,
+            uint256 daysPastDue,
+            uint256 period
+        );
+
+    /**
      * @dev Explicit default trigger, e.g. after off‑chain/legal decision.
      * Returns true if state moved into DEFAULTED.
      */

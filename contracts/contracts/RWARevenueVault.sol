@@ -132,7 +132,10 @@ contract RWARevenueVault is AccessControl, ReentrancyGuard {
         onlyRole(PAYMENT_ROLE)
         nonReentrant
     {
+        // Sanity checks
+        ( , uint256 expected, ) = logicContract.getSchedule();
         require(totalIdle >= monthlyExpectedPayment, "Insufficient idle funds");
+        require(monthlyExpectedPayment == expected, "Expected payment mismatch");
         require(registry.isAssetActive(assetId), "Asset not active");
 
         // 1. Deduct fees

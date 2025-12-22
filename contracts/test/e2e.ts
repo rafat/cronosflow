@@ -3,20 +3,13 @@ import { expect } from "chai";
 import hre from "hardhat";
 
 describe("E2E: Rental RWA Lifecycle", function () {
-
   async function deployFixture() {
-    const [
-      admin,
-      factory,
-      compliance,
-      paymentCollector,
-      tenant,
-      investor
-    ] = await hre.ethers.getSigners();
+    const [admin, factory, compliance, paymentCollector, tenant, investor] =
+      await hre.ethers.getSigners();
 
-    /* -----------------------------------------------------------
-       Deploy Registry
-    ----------------------------------------------------------- */
+    // -------------------------
+    // Deploy registry + roles
+    // -------------------------
     const Registry = await hre.ethers.getContractFactory("RWAAssetRegistry");
     const registry = await Registry.deploy();
 
@@ -26,72 +19,58 @@ describe("E2E: Rental RWA Lifecycle", function () {
 
     await registry.connect(compliance).verifyKYC(factory.address);
 
-    /* -----------------------------------------------------------
-       Deploy Payment Token (USDC mock)
-    ----------------------------------------------------------- */
+    // -------------------------
+    // Deploy payment token (mock USDC)
+    // -------------------------
     const MockERC20 = await hre.ethers.getContractFactory("MockERC20");
     const usdc = await MockERC20.deploy("USD Coin", "USDC");
-
     await usdc.mint(tenant.address, hre.ethers.parseUnits("10000", 18));
 
-    /* -----------------------------------------------------------
-       Register Asset
-    ----------------------------------------------------------- */
-
+    // -------------------------
+    // Register + whitelist asset
+    // -------------------------
     const assetId = await registry.connect(factory).registerAsset.staticCall(
-        0, // REAL_ESTATE
-        factory.address,
-        1_000_000,
-        "ipfs://test"
-      );
-    await registry.connect(factory).registerAsset(
-        0, // REAL_ESTATE
-        factory.address,
-        1_000_000,
-        "ipfs://test"
-      );
-
+      0, // AssetType.REAL_ESTATE
+      factory.address,
+      1_000_000,
+      "ipfs://test"
+    );
+    await registry.connect(factory).registerAsset(0, factory.address, 1_000_000, "ipfs://test");
 
     await registry.connect(compliance).whitelistAsset(assetId);
 
-    /* -----------------------------------------------------------
-       Deploy Logic
-    ----------------------------------------------------------- */
+    // -------------------------
+    // Deploy + init rental logic
+    // -------------------------
     const Logic = await hre.ethers.getContractFactory("RentalCashFlowLogic");
     const logic = await Logic.deploy();
 
     const rent = hre.ethers.parseUnits("1000", 18);
     const interval = 30 * 24 * 60 * 60;
     const graceDays = 5;
-    const leaseEnd = (await time.latest()) + 6 * interval;
 
+    const firstDue = await time.latest();
+    const leaseEnd = firstDue + 6 * interval;
+
+    // IMPORTANT: now includes registry address (6th param)
     const initData = hre.ethers.AbiCoder.defaultAbiCoder().encode(
-      ["uint256", "uint256", "uint256", "uint256"],
-      [rent, interval, graceDays, leaseEnd]
+      ["uint256", "uint256", "uint256", "uint256", "uint256", "address"],
+      [rent, interval, firstDue, graceDays, leaseEnd, registry.target]
     );
-
     await logic.initialize(initData);
 
-    /* -----------------------------------------------------------
-       Deploy Vault
-    ----------------------------------------------------------- */
+    // -------------------------
+    // Deploy vault
+    // -------------------------
     const Vault = await hre.ethers.getContractFactory("RWARevenueVault");
     const vault = await Vault.deploy();
 
-    await vault.initialize(
-      admin.address,
-      logic.target,
-      usdc.target,
-      registry.target,
-      assetId
-    );
-
+    await vault.initialize(admin.address, logic.target, usdc.target, registry.target, assetId);
     await vault.grantRole(await vault.PAYMENT_ROLE(), paymentCollector.address);
 
-
-    /* -----------------------------------------------------------
-       Deploy Investor Token
-    ----------------------------------------------------------- */
+    // -------------------------
+    // Deploy investor token
+    // -------------------------
     const Token = await hre.ethers.getContractFactory("InvestorShareToken");
     const token = await Token.deploy(
       assetId,
@@ -104,33 +83,28 @@ describe("E2E: Rental RWA Lifecycle", function () {
 
     await vault.setTokenContracts(token.target);
 
-    await registry.connect(factory).linkContracts(
-      assetId,
-      logic.target,
-      vault.target,
-      token.target
-    );
-
-    /* -----------------------------------------------------------
-       Activate Asset
-    ----------------------------------------------------------- */
+    // -------------------------
+    // Link contracts + activate asset
+    // -------------------------
+    await registry.connect(factory).linkContracts(assetId, logic.target, vault.target, token.target);
     await registry.connect(compliance).activateAsset(assetId);
 
-    /* -----------------------------------------------------------
-       Mint Investor Shares
-    ----------------------------------------------------------- */
+    // Mint shares to investor
     await vault.mintShares(investor.address, hre.ethers.parseUnits("100", 18));
 
     return {
       registry,
       logic,
       vault,
-      token,
       usdc,
       assetId,
       tenant,
       investor,
-      paymentCollector
+      paymentCollector,
+      rent,
+      interval,
+      graceDays,
+      firstDue,
     };
   }
 
@@ -139,52 +113,55 @@ describe("E2E: Rental RWA Lifecycle", function () {
       registry,
       logic,
       vault,
-      token,
       usdc,
       assetId,
       tenant,
       investor,
-      paymentCollector
+      paymentCollector,
+      rent,
+      interval,
+      graceDays,
+      firstDue,
     } = await loadFixture(deployFixture);
 
-    /* -----------------------------------------------------------
-       Tenant pays rent
-    ----------------------------------------------------------- */
-    await usdc.connect(tenant).approve(vault.target, hre.ethers.parseUnits("1000", 18));
-    await vault.connect(paymentCollector).depositRevenue(
-      tenant.address,
-      hre.ethers.parseUnits("1000", 18)
-    );
+    const DAY = 24 * 60 * 60;
 
-    await logic.processPayment(
-      hre.ethers.parseUnits("1000", 18),
-      await time.latest()
-    );
+    // -------------------------
+    // Tenant pays rent into vault
+    // -------------------------
+    await usdc.connect(tenant).approve(vault.target, rent);
+    await vault.connect(paymentCollector).depositRevenue(tenant.address, rent);
 
-    await vault.commitToDistribution(hre.ethers.parseUnits("1000", 18));
+    // NOTE:
+    // If you later restrict `processPayment()` to onlyRegistry/onlyVault,
+    // you'll need to route this call through that authorized component.
+    await logic.processPayment(rent, await time.latest());
 
-    /* -----------------------------------------------------------
-       Investor claims yield
-    ----------------------------------------------------------- */
+    // Commit to distribution (checks against logic.getSchedule().expected)
+    await vault.connect(paymentCollector).commitToDistribution(rent);
+
+    // Investor claims yield
     const balanceBefore = await usdc.balanceOf(investor.address);
-
     await vault.connect(investor).claimYield();
-
     const balanceAfter = await usdc.balanceOf(investor.address);
     expect(balanceAfter).to.be.gt(balanceBefore);
 
-    /* -----------------------------------------------------------
-       Miss two rent periods → default
-    ----------------------------------------------------------- */
-    await time.increase(31 * 24 * 60 * 60);
-    await logic.evaluateDefault(await time.latest());
-    await registry.checkAndTriggerDefault(assetId);
+    // -------------------------
+    // Miss two rent periods → registry triggers default
+    // Use exact timestamps (increaseTo) to avoid ambiguity.
+    // -------------------------
 
-    await time.increase(31 * 24 * 60 * 60);
-    await logic.evaluateDefault(await time.latest());
-    await registry.checkAndTriggerDefault(assetId);
+    // Past grace for period 1 (=> LATE)
+  const t1 = firstDue + interval + graceDays * DAY + 1;
+  await time.increaseTo(t1);
+  await registry.checkAndTriggerDefault(assetId);
 
-    const asset = await registry.assets(assetId);
-    expect(asset.currentStatus).to.equal(3); // DEFAULTED
+  // Past grace for period 2 (=> DEFAULTED)
+  const t2 = firstDue + 2 * interval + graceDays * DAY + 1;
+  await time.increaseTo(t2);
+  await registry.checkAndTriggerDefault(assetId);
+
+  const asset = await registry.assets(assetId);
+  expect(asset.currentStatus).to.equal(4); // DEFAULTED
   });
 });

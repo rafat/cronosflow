@@ -5,6 +5,8 @@ import "@openzeppelin/contracts/access/AccessControl.sol";
 import "@openzeppelin/contracts/utils/Pausable.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "./RWACommonTypes.sol";
+import "./interface/ICashFlowLogic.sol";
+
 
 contract RWAAssetRegistry is AccessControl, Pausable, ReentrancyGuard {
     // === ROLE DEFINITIONS ===
@@ -47,6 +49,7 @@ contract RWAAssetRegistry is AccessControl, Pausable, ReentrancyGuard {
 
         // === LIFECYCLE TRACKING ===
         RWACommonTypes.AssetStatus currentStatus;       // Current state in lifecycle
+        RWACommonTypes.AssetStatus statusBeforePause;  // To restore after unpause
         uint256 registrationDate;        // When asset was registered
         uint256 activationDate;          // When asset went live
 
@@ -129,10 +132,13 @@ contract RWAAssetRegistry is AccessControl, Pausable, ReentrancyGuard {
     event KYCVerified(address indexed entity);
     event AssetWhitelisted(uint256 indexed assetId);
     event OracleAdded(address indexed oracle);
+    event AssetPaused(uint256 indexed assetId, address indexed by, uint256 timestamp);
+    event AssetUnpaused(uint256 indexed assetId, address indexed by, uint256 timestamp);
 
     constructor() {
         // Grant the deployer (you) the admin role so you can assign others later
         _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
+        _grantRole(EMERGENCY_ADMIN_ROLE, msg.sender);
     }
 
     /**
@@ -152,7 +158,7 @@ contract RWAAssetRegistry is AccessControl, Pausable, ReentrancyGuard {
         returns (uint256 assetId) 
     {
         require(_assetValue > 0, "Asset value must be positive");
-        require(kycVerified[msg.sender], "Asset originator must pass KYC");
+        require(kycVerified[_originator], "Asset originator must pass KYC");
         
         // Increment counter for new asset ID
         assetCounter++;
@@ -208,7 +214,7 @@ contract RWAAssetRegistry is AccessControl, Pausable, ReentrancyGuard {
     {
         RealWorldAsset storage asset = assets[_assetId];
         require(asset.assetId != 0, "Asset does not exist");
-        require(asset.currentStatus == RWACommonTypes.AssetStatus.REGISTERED, "Asset already linked");
+        require(asset.currentStatus == RWACommonTypes.AssetStatus.REGISTERED, "Asset not registered");
         require(_logicContract != address(0), "Invalid logic contract");
         require(_vaultContract != address(0), "Invalid vault contract");
         require(_token != address(0), "Invalid token");
@@ -216,6 +222,8 @@ contract RWAAssetRegistry is AccessControl, Pausable, ReentrancyGuard {
         asset.logicContract = _logicContract;
         asset.vaultContract = _vaultContract;
         asset.tokenContract = _token;
+
+        asset.currentStatus = RWACommonTypes.AssetStatus.LINKED;
 
         
         emit ContractsLinked(
@@ -233,10 +241,12 @@ contract RWAAssetRegistry is AccessControl, Pausable, ReentrancyGuard {
     function activateAsset(uint256 _assetId) external onlyRole(COMPLIANCE_ROLE) {
         RealWorldAsset storage asset = assets[_assetId];
         require(asset.assetId != 0, "Asset does not exist");
-        require(asset.currentStatus == RWACommonTypes.AssetStatus.REGISTERED, "Asset already activated");
+        require(asset.currentStatus == RWACommonTypes.AssetStatus.LINKED, "Asset not linked");
         require(asset.isKYCVerified, "KYC not verified");
         require(asset.isWhitelisted, "Asset not whitelisted");
         require(asset.logicContract != address(0), "Contracts not linked");
+        require(asset.vaultContract != address(0), "Vault not linked");
+        require(asset.tokenContract != address(0), "Token not linked");
 
         asset.currentStatus = RWACommonTypes.AssetStatus.ACTIVE;
         asset.activationDate = block.timestamp;
@@ -260,6 +270,7 @@ contract RWAAssetRegistry is AccessControl, Pausable, ReentrancyGuard {
         require(asset.assetId != 0, "Asset does not exist");
         require(asset.currentStatus == RWACommonTypes.AssetStatus.ACTIVE, "Asset not active");
         require(_paymentAmount > 0, "Payment must be positive");
+        require(!asset.isPaused, "Asset paused");
         
         // Update payment tracking
         asset.lastPaymentDate = block.timestamp;
@@ -285,57 +296,89 @@ contract RWAAssetRegistry is AccessControl, Pausable, ReentrancyGuard {
     * Called by Track 2 enforcement contract or permissionlessly.
     * RETURNS: true if default detected → triggers Track 2 workflow.
     * @param _assetId Asset to check
-    * @return isDefault True if default condition met
+    * @return triggered True if default condition met
     */
-    function checkAndTriggerDefault(uint256 _assetId) external returns (bool isDefault) {
+    function checkAndTriggerDefault(uint256 _assetId)
+        external
+        nonReentrant
+        returns (bool triggered)
+    {
         RealWorldAsset storage asset = assets[_assetId];
         require(asset.assetId != 0, "Asset does not exist");
+        require(!asset.isPaused, "Asset paused");
 
-        if (asset.currentStatus != RWACommonTypes.AssetStatus.ACTIVE) {
+        // Only evaluate for assets that can evolve due to cashflow checks
+        // (Tune this to your desired lifecycle.)
+        if (
+            asset.currentStatus != RWACommonTypes.AssetStatus.ACTIVE &&
+            asset.currentStatus != RWACommonTypes.AssetStatus.UNDER_REVIEW
+        ) {
             return false;
         }
 
-        // Calculate how many days since the payment was overdue
-        // The payment was due on nextPaymentDueDate, so calculate how many days past due
-        uint256 daysPastDue = 0;
-        if (block.timestamp > asset.nextPaymentDueDate) {
-            daysPastDue = (block.timestamp - asset.nextPaymentDueDate) / 1 days;
-        }
+        address logicAddr = asset.logicContract;
+        require(logicAddr != address(0), "Logic not linked");
 
-        // Update days in default
+        // Ask the asset-specific logic contract to evaluate health/status at this time.
+        (RWACommonTypes.AssetStatus newStatus, CashflowHealth newHealth) =
+            ICashFlowLogic(logicAddr).evaluateDefault(block.timestamp);
+
+        // Pull schedule info so registry stays in sync for UI/agents
+        (
+            uint256 nextDueDate,
+            uint256 expectedPeriodicPayment,
+            uint256 maturityDate
+        ) = ICashFlowLogic(logicAddr).getSchedule();
+
+        asset.nextPaymentDueDate = nextDueDate;
+        asset.expectedMonthlyPayment = expectedPeriodicPayment;
+        asset.expectedMaturityDate = maturityDate;
+
+        // Update observability fields
+        // If logic says DEFAULTED or LIQUIDATING, compute days past due from nextDueDate.
+        uint256 daysPastDue = 0;
+        if (block.timestamp > nextDueDate) {
+            daysPastDue = (block.timestamp - nextDueDate) / 1 days;
+        }
         asset.daysInDefault = daysPastDue;
 
-        // TRIGGER: If past threshold days without payment
-        if (daysPastDue > defaultThresholdDays) {
-            asset.missedPayments++;
-
-            // On reaching the default threshold → officially DEFAULT
-            // The test expects the asset to be marked as DEFAULTED after missing the second deadline
-            if (asset.missedPayments >= 1 && daysPastDue > defaultThresholdDays) {
-                asset.currentStatus = RWACommonTypes.AssetStatus.DEFAULTED;
-
-                emit DefaultTriggered(
-                    _assetId,
-                    asset.missedPayments,
-                    daysPastDue,
-                    block.timestamp
-                );
-
-                return true;
-            }
+        // Mirror status if changed
+        RWACommonTypes.AssetStatus oldStatus = asset.currentStatus;
+        if (newStatus != oldStatus) {
+            asset.currentStatus = newStatus;
         }
 
-        // If past liquidation threshold → LIQUIDATING (Track 2 enforcement)
-        if (daysPastDue > liquidationThresholdDays) {
-            asset.currentStatus = RWACommonTypes.AssetStatus.LIQUIDATING;
+        // Heuristic: track missedPayments based on logic health transitions.
+        // Because registry doesn’t know period indexes, it should not try to reproduce
+        // the logic’s “missed period counting”. We just increment when we newly enter
+        // a “bad” state from a non-bad state.
+        bool isBadHealth =
+            (newHealth == CashflowHealth.LATE || newHealth == CashflowHealth.DEFAULTED);
 
-            emit LiquidationInitiated(_assetId, daysPastDue, block.timestamp);
+        bool wasBadStatus =
+            (oldStatus == RWACommonTypes.AssetStatus.DEFAULTED ||
+            oldStatus == RWACommonTypes.AssetStatus.LIQUIDATING);
 
+        if (isBadHealth && !wasBadStatus) {
+            asset.missedPayments += 1;
+        }
+
+        // Emit events / return whether Track-2 action should run
+        // Default / liquidation are the actionable states.
+        if (newStatus == RWACommonTypes.AssetStatus.DEFAULTED) {
+            emit DefaultTriggered(_assetId, asset.missedPayments, daysPastDue, block.timestamp);
             return true;
         }
 
+        if (newStatus == RWACommonTypes.AssetStatus.LIQUIDATING) {
+            emit LiquidationInitiated(_assetId, daysPastDue, block.timestamp);
+            return true;
+        }
+
+        // If completed/expired, nothing to trigger.
         return false;
     }
+
 
     /**
     * @dev Mark asset as liquidated (after Track 2 enforcement completes).
@@ -479,6 +522,32 @@ contract RWAAssetRegistry is AccessControl, Pausable, ReentrancyGuard {
         emit OracleAdded(_oracle);
     }
 
+    function pauseAsset(uint256 _assetId) external onlyRole(EMERGENCY_ADMIN_ROLE) {
+        RealWorldAsset storage asset = assets[_assetId];
+        require(asset.assetId != 0, "Asset does not exist");
+        require(!asset.isPaused, "Asset already paused");
+
+        asset.isPaused = true;
+
+        asset.statusBeforePause = asset.currentStatus;
+        asset.currentStatus = RWACommonTypes.AssetStatus.PAUSED;
+
+        emit AssetPaused(_assetId, msg.sender, block.timestamp);
+    }
+
+    function unpauseAsset(uint256 _assetId) external onlyRole(EMERGENCY_ADMIN_ROLE) {
+        RealWorldAsset storage asset = assets[_assetId];
+        require(asset.assetId != 0, "Asset does not exist");
+        require(asset.isPaused, "Asset not paused");
+
+        asset.isPaused = false;
+
+        // Restore previous status or set to ACTIVE if it was paused while active
+        asset.currentStatus = asset.statusBeforePause;
+
+        emit AssetUnpaused(_assetId, msg.sender, block.timestamp);
+    }
+
     /**
     * @dev Check if asset is currently active.
     * @param _assetId Asset ID to check.
@@ -488,6 +557,24 @@ contract RWAAssetRegistry is AccessControl, Pausable, ReentrancyGuard {
         return assets[_assetId].currentStatus == RWACommonTypes.AssetStatus.ACTIVE;
     }
 
+    /**
+    * @dev Check if asset is currently paused.
+    * @param _assetId Asset ID to check.
+    * @return True if asset is paused.
+    */
+    function isAssetPaused(uint256 _assetId) external view returns (bool) {
+        RealWorldAsset storage asset = assets[_assetId];
+        require(asset.assetId != 0, "Asset does not exist");
+        return asset.isPaused;
+    }
 
+    /**
+    * @dev Check if asset is whitelisted.
+    * @param _assetId Asset ID to check.
+    * @return True if asset is whitelisted.
+    */
+    function isWhitelisted(uint256 _assetId) public view returns (bool) {
+        return assets[_assetId].isWhitelisted;
+    }
 
  }

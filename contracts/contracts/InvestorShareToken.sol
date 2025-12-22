@@ -10,7 +10,7 @@ import "@openzeppelin/contracts/access/AccessControl.sol";
  * One token contract MUST correspond to exactly one assetId in RWAAssetRegistry.
  */
 interface IRWAAssetRegistry {
-    function isWhitelisted(address user) external view returns (bool);
+    function isWhitelisted(uint256 assetId) external view returns (bool);
     function isAssetPaused(uint256 assetId) external view returns (bool);
     function isAssetActive(uint256 assetId) external view returns (bool);
 }
@@ -128,23 +128,18 @@ contract InvestorShareToken is ERC20, AccessControl {
      *
      * Minting and burning bypass these checks.
      */
-    function _update(
-        address from,
-        address to,
-        uint256 amount
-    ) internal override {
-        super._update(from, to, amount);
+    function _update(address from, address to, uint256 amount) internal override {
+        // Only gate *transfers* (not mint/burn)
+        if (from != address(0) && to != address(0)) {
+            IRWAAssetRegistry reg = IRWAAssetRegistry(registry);
 
-        // Allow mint & burn
-        if (from == address(0) || to == address(0)) {
-            return;
+            require(reg.isAssetActive(assetId), "Asset not active");
+            require(!reg.isAssetPaused(assetId), "Asset paused");
+            require(reg.isWhitelisted(assetId), "Asset not whitelisted");
+            require(!IRWARevenueVault(vault).distributionStarted(), "Transfers locked");
         }
 
-        IRWAAssetRegistry reg = IRWAAssetRegistry(registry);
-
-        require(reg.isAssetActive(assetId), "Asset not active");
-        require(!reg.isAssetPaused(assetId), "Asset paused");
-        require(reg.isWhitelisted(to), "Recipient not whitelisted");
+        super._update(from, to, amount);
     }
 
     // =========================
