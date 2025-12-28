@@ -4,38 +4,14 @@ pragma solidity ^0.8.20;
 import "./interface/ICashFlowLogic.sol";
 import "./RWACommonTypes.sol";
 
-/**
- * @title RentalCashflowLogic
- * @dev Cashflow engine for monthly rental agreements.
- *
- * Responsibilities:
- * - Track rent schedule
- * - Track which rental periods are paid
- * - Compute lateness / default signals
- * - Expose expected payment info for agents & adapters
- *
- * Does NOT:
- * - Move funds
- * - Distribute yield
- * - Liquidate assets
- */
 contract RentalCashFlowLogic is ICashFlowLogic {
-    // =============================================================
-    // Lease Parameters (Immutable after init)
-    // =============================================================
-
-    uint256 public rentAmount;            // Monthly rent
-    uint256 public paymentInterval;       // Seconds per rent period (≈30 days)
-    uint256 public gracePeriodDays;        // Grace period after due date
-    uint256 public leaseEndDate;           // Lease maturity timestamp
-
-    // =============================================================
-    // Internal Cashflow State
-    // =============================================================
+    uint256 public rentAmount;
+    uint256 public paymentInterval;
+    uint256 public gracePeriodDays;
+    uint256 public leaseEndDate;
 
     CashflowHealth public health;
 
-    // Tracks paid rental periods (period index => paid)
     mapping(uint256 => bool) public periodPaid;
 
     uint256 public startTimestamp;
@@ -45,10 +21,6 @@ contract RentalCashFlowLogic is ICashFlowLogic {
     uint256 public lastMissedPeriod;
 
     bool public initialized;
-
-    // =============================================================
-    // Events
-    // =============================================================
 
     event LeaseInitialized(
         uint256 rentAmount,
@@ -67,19 +39,6 @@ contract RentalCashFlowLogic is ICashFlowLogic {
         _;
     }
 
-    // =============================================================
-    // Initialization
-    // =============================================================
-
-    /**
-     * @dev data = abi.encode(
-     *   rentAmount,
-     *   paymentIntervalSeconds (e.g. 30 days),
-     *   firstPaymentDueDate,
-     *   gracePeriodDays,
-     *   leaseEndDate
-     * )
-     */
     function initialize(bytes calldata data) external override {
         require(!initialized, "Already initialized");
 
@@ -98,62 +57,29 @@ contract RentalCashFlowLogic is ICashFlowLogic {
         require(paymentInterval >= 28 days, "Interval too short");
         require(registry != address(0), "Invalid registry");
 
-        // First due date should not be in the past (or allow slight backdating if you want)
         require(firstPaymentDueDate + 5 minutes >= block.timestamp, "First due date too far in past");
-
-        // Lease end must be after first due date
         require(leaseEndDate > firstPaymentDueDate, "Lease end before first due");
 
-        startTimestamp = firstPaymentDueDate; // anchor schedule to first due date
+        startTimestamp = firstPaymentDueDate;
         health = CashflowHealth.PERFORMING;
         initialized = true;
 
-        emit LeaseInitialized(
-            rentAmount,
-            paymentInterval,
-            firstPaymentDueDate,
-            gracePeriodDays,
-            leaseEndDate
-        );
+        emit LeaseInitialized(rentAmount, paymentInterval, firstPaymentDueDate, gracePeriodDays, leaseEndDate);
     }
 
-    // =============================================================
-    // Views (ICashflowLogic)
-    // =============================================================
-
-    function getAssetStatus()
-        public
-        view
-        override
-        returns (RWACommonTypes.AssetStatus)
-    {
-        if (health == CashflowHealth.DEFAULTED) {
-            return RWACommonTypes.AssetStatus.DEFAULTED;
-        }
-        if (health == CashflowHealth.COMPLETED) {
-            return RWACommonTypes.AssetStatus.EXPIRED;
-        }
+    function getAssetStatus() public view override returns (RWACommonTypes.AssetStatus) {
+        if (health == CashflowHealth.DEFAULTED) return RWACommonTypes.AssetStatus.DEFAULTED;
+        if (health == CashflowHealth.COMPLETED) return RWACommonTypes.AssetStatus.EXPIRED;
         return RWACommonTypes.AssetStatus.ACTIVE;
     }
 
-    function getCashflowHealth()
-        external
-        view
-        override
-        returns (CashflowHealth)
-    {
+    function getCashflowHealth() external view override returns (CashflowHealth) {
         return health;
     }
 
-    function getExpectedPayment(uint256 timestamp)
-        external
-        view
-        override
-        returns (PaymentStatus memory)
-    {
+    function getExpectedPayment(uint256 timestamp) external view override returns (PaymentStatus memory) {
         uint256 currentPeriod = _periodAt(timestamp);
         uint256 dueDate = _dueDateForPeriod(currentPeriod);
-
         bool paid = periodPaid[currentPeriod];
 
         uint256 daysPastDue = 0;
@@ -173,47 +99,24 @@ contract RentalCashFlowLogic is ICashFlowLogic {
         });
     }
 
-    function getRemainingPrincipal()
-        external
-        pure
-        override
-        returns (uint256)
-    {
-        // Rentals are recurring — no remaining principal
+    function getRemainingPrincipal() external pure override returns (uint256) {
         return 0;
     }
 
-    function getTotalReceived()
-        external
-        view
-        override
-        returns (uint256)
-    {
+    function getTotalReceived() external view override returns (uint256) {
         return totalAmountPaid;
     }
 
-    function getSchedule()
-        external
-        view
-        override
-        returns (
-            uint256 nextDueDate,
-            uint256 expectedPeriodicPayment,
-            uint256 maturityDate
-        )
-    {
+    function getSchedule() external view override returns (uint256 nextDueDate, uint256 expectedPeriodicPayment, uint256 maturityDate) {
         nextDueDate = _dueDateForPeriod(_periodAt(block.timestamp));
         expectedPeriodicPayment = rentAmount;
         maturityDate = leaseEndDate;
     }
 
-    // =============================================================
-    // State Updates
-    // =============================================================
-
     function processPayment(uint256 amount, uint256 timestamp)
         external
         override
+        onlyRegistry
         returns (RWACommonTypes.AssetStatus)
     {
         require(initialized, "Not initialized");
@@ -246,26 +149,18 @@ contract RentalCashFlowLogic is ICashFlowLogic {
         onlyRegistry
         returns (RWACommonTypes.AssetStatus, CashflowHealth)
     {
-        (
-            RWACommonTypes.AssetStatus newStatus,
-            CashflowHealth newHealth,
-            ,
-            uint256 period
-        ) = this.previewDefault(timestamp);
+        (RWACommonTypes.AssetStatus newStatus, CashflowHealth newHealth,, uint256 period) =
+            this.previewDefault(timestamp);
 
         CashflowHealth oldHealth = health;
         health = newHealth;
 
-        // Keep analytics fields consistent with preview computation
         if (newHealth == CashflowHealth.LATE || newHealth == CashflowHealth.DEFAULTED) {
             missedPeriods = _countMissedPeriodsUpTo(period, timestamp);
             lastMissedPeriod = period;
         }
 
-        if (oldHealth != newHealth) {
-            emit CashflowHealthUpdated(newHealth);
-        }
-
+        if (oldHealth != newHealth) emit CashflowHealthUpdated(newHealth);
         return (newStatus, newHealth);
     }
 
@@ -273,22 +168,12 @@ contract RentalCashFlowLogic is ICashFlowLogic {
         external
         view
         override
-        returns (
-            RWACommonTypes.AssetStatus newStatus,
-            CashflowHealth newHealth,
-            uint256 daysPastDue,
-            uint256 period
-        )
+        returns (RWACommonTypes.AssetStatus newStatus, CashflowHealth newHealth, uint256 daysPastDue, uint256 period)
     {
         require(initialized, "Not initialized");
 
         if (timestamp >= leaseEndDate) {
-            return (
-                RWACommonTypes.AssetStatus.EXPIRED,
-                CashflowHealth.COMPLETED,
-                0,
-                _periodAt(timestamp)
-            );
+            return (RWACommonTypes.AssetStatus.EXPIRED, CashflowHealth.COMPLETED, 0, _periodAt(timestamp));
         }
 
         period = _periodAt(timestamp);
@@ -310,49 +195,27 @@ contract RentalCashFlowLogic is ICashFlowLogic {
             return (RWACommonTypes.AssetStatus.DEFAULTED, CashflowHealth.DEFAULTED, daysPastDue, period);
         }
 
-        // missed is >= 1 here (since we're past grace and current period unpaid)
         return (RWACommonTypes.AssetStatus.ACTIVE, CashflowHealth.LATE, daysPastDue, period);
     }
 
-
-    function forceDefault()
-        external
-        override
-        returns (bool)
-    {
+    // FIXED: no longer permissionless
+    function forceDefault() external override onlyRegistry returns (bool) {
         health = CashflowHealth.DEFAULTED;
         emit CashflowHealthUpdated(health);
         return true;
     }
 
-    function markMatured(uint256)
-        external
-        override
-    {
+    function markMatured(uint256) external override {
         health = CashflowHealth.COMPLETED;
         emit CashflowHealthUpdated(health);
     }
 
-    // =============================================================
-    // Internal Helpers
-    // =============================================================
-
-    function _periodAt(uint256 timestamp)
-        internal
-        view
-        returns (uint256)
-    {
-        if (timestamp < startTimestamp) {
-            return 0;
-        }
+    function _periodAt(uint256 timestamp) internal view returns (uint256) {
+        if (timestamp < startTimestamp) return 0;
         return (timestamp - startTimestamp) / paymentInterval;
     }
 
-    function _dueDateForPeriod(uint256 period)
-        internal
-        view
-        returns (uint256)
-    {
+    function _dueDateForPeriod(uint256 period) internal view returns (uint256) {
         return startTimestamp + (period * paymentInterval);
     }
 
@@ -363,9 +226,7 @@ contract RentalCashFlowLogic is ICashFlowLogic {
             uint256 due = _dueDateForPeriod(p);
             uint256 daysPastDue = timestamp > due ? (timestamp - due) / 1 days : 0;
 
-            if (daysPastDue >= gracePeriodDays) {
-                missed++;
-            }
+            if (daysPastDue >= gracePeriodDays) missed++;
         }
     }
 }

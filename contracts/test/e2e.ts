@@ -4,20 +4,22 @@ import hre from "hardhat";
 
 describe("E2E: Rental RWA Lifecycle", function () {
   async function deployFixture() {
-    const [admin, factory, compliance, paymentCollector, tenant, investor] =
+    const [admin, factory, compliance, paymentCollector, tenant, investor, agent] =
       await hre.ethers.getSigners();
 
     // -------------------------
     // Deploy registry + roles
     // -------------------------
     const Registry = await hre.ethers.getContractFactory("RWAAssetRegistry");
-    const registry = await Registry.deploy();
+    const registry = await Registry.deploy(admin.address);
 
     await registry.grantRole(await registry.ASSET_FACTORY_ROLE(), factory.address);
     await registry.grantRole(await registry.COMPLIANCE_ROLE(), compliance.address);
     await registry.grantRole(await registry.PAYMENT_COLLECTOR_ROLE(), paymentCollector.address);
 
     await registry.connect(compliance).verifyKYC(factory.address);
+    await registry.connect(compliance).verifyKYC(investor.address);
+    await registry.connect(compliance).whitelistRecipient(investor.address);
 
     // -------------------------
     // Deploy payment token (mock USDC)
@@ -27,7 +29,7 @@ describe("E2E: Rental RWA Lifecycle", function () {
     await usdc.mint(tenant.address, hre.ethers.parseUnits("10000", 18));
 
     // -------------------------
-    // Register + whitelist asset
+    // Register asset
     // -------------------------
     const assetId = await registry.connect(factory).registerAsset.staticCall(
       0, // AssetType.REAL_ESTATE
@@ -36,8 +38,6 @@ describe("E2E: Rental RWA Lifecycle", function () {
       "ipfs://test"
     );
     await registry.connect(factory).registerAsset(0, factory.address, 1_000_000, "ipfs://test");
-
-    await registry.connect(compliance).whitelistAsset(assetId);
 
     // -------------------------
     // Deploy + init rental logic
@@ -49,7 +49,7 @@ describe("E2E: Rental RWA Lifecycle", function () {
     const interval = 30 * 24 * 60 * 60;
     const graceDays = 5;
 
-    const firstDue = await time.latest();
+    const firstDue = await time.latest() + 60;
     const leaseEnd = firstDue + 6 * interval;
 
     // IMPORTANT: now includes registry address (6th param)
@@ -65,7 +65,7 @@ describe("E2E: Rental RWA Lifecycle", function () {
     const Vault = await hre.ethers.getContractFactory("RWARevenueVault");
     const vault = await Vault.deploy();
 
-    await vault.initialize(admin.address, logic.target, usdc.target, registry.target, assetId);
+    await vault.initialize(admin.address, agent.address, logic.target, usdc.target, registry.target, assetId, admin.address);
     await vault.grantRole(await vault.PAYMENT_ROLE(), paymentCollector.address);
 
     // -------------------------
@@ -78,7 +78,8 @@ describe("E2E: Rental RWA Lifecycle", function () {
       "RWA-SG",
       hre.ethers.parseUnits("1000", 18),
       registry.target,
-      vault.target
+      vault.target,
+      admin.address
     );
 
     await vault.setTokenContracts(token.target);
@@ -105,6 +106,8 @@ describe("E2E: Rental RWA Lifecycle", function () {
       interval,
       graceDays,
       firstDue,
+      admin,
+      agent
     };
   }
 
@@ -122,6 +125,8 @@ describe("E2E: Rental RWA Lifecycle", function () {
       interval,
       graceDays,
       firstDue,
+      admin,
+      agent
     } = await loadFixture(deployFixture);
 
     const DAY = 24 * 60 * 60;
@@ -135,7 +140,7 @@ describe("E2E: Rental RWA Lifecycle", function () {
     // NOTE:
     // If you later restrict `processPayment()` to onlyRegistry/onlyVault,
     // you'll need to route this call through that authorized component.
-    await logic.processPayment(rent, await time.latest());
+    await registry.connect(paymentCollector).recordPayment(assetId, rent);
 
     // Commit to distribution (checks against logic.getSchedule().expected)
     await vault.connect(paymentCollector).commitToDistribution(rent);

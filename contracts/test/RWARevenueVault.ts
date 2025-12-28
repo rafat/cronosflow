@@ -4,7 +4,7 @@ import hre from "hardhat";
 
 describe("RWARevenueVault + InvestorShareToken", function () {
   async function deployFixture() {
-    const [owner, investor1, investor2] = await hre.ethers.getSigners();
+    const [owner, investor1, investor2, agent] = await hre.ethers.getSigners();
 
     const Registry = await hre.ethers.getContractFactory("MockRegistry");
     const registry = await Registry.deploy();
@@ -22,10 +22,12 @@ describe("RWARevenueVault + InvestorShareToken", function () {
 
     await vault.initialize(
       owner.address,
+      agent.address,
       logic.target,
       paymentToken.target,
       registry.target,
-      1
+      1,
+      owner.address
     );
 
     const Token = await hre.ethers.getContractFactory("InvestorShareToken");
@@ -35,12 +37,13 @@ describe("RWARevenueVault + InvestorShareToken", function () {
       "RWA1",
       hre.ethers.parseUnits("1000", 18),
       registry.target,
-      vault.target
+      vault.target,
+      owner.address
     );
 
     await vault.setTokenContracts(token.target);
 
-    return { owner, investor1, investor2, registry, paymentToken, vault, token };
+    return { owner, investor1, investor2, agent, registry, paymentToken, vault, token };
   }
 
   describe("InvestorShareToken", function () {
@@ -65,21 +68,23 @@ describe("RWARevenueVault + InvestorShareToken", function () {
 
   describe("Revenue flow", function () {
     it("Deposits revenue into idle balance", async function () {
-      const { vault, paymentToken, owner } = await loadFixture(deployFixture);
-      await paymentToken.approve(vault.target, 1000);
-      await vault.depositRevenue(owner.address, 1000);
+      const { vault, paymentToken, owner, agent } = await loadFixture(deployFixture);
+      await paymentToken.connect(owner).transfer(agent.address, 1000);
+      await paymentToken.connect(agent).approve(vault.target, 1000);
+      await vault.connect(agent).depositRevenue(agent.address, 1000);
       expect(await vault.getAvailableForDeployment()).to.equal(1000);
     });
 
     it("Commits distribution and updates index", async function () {
-      const { vault, paymentToken, owner, investor1 } = await loadFixture(deployFixture);
+      const { vault, paymentToken, owner, agent, investor1 } = await loadFixture(deployFixture);
 
       await vault.mintShares(investor1.address, 100);
 
-      await paymentToken.approve(vault.target, hre.ethers.parseUnits("1000", 18));
-      await vault.depositRevenue(owner.address, hre.ethers.parseUnits("1000", 18));
+      await paymentToken.connect(owner).transfer(agent.address, hre.ethers.parseUnits("1000", 18));
+      await paymentToken.connect(agent).approve(vault.target, hre.ethers.parseUnits("1000", 18));
+      await vault.connect(agent).depositRevenue(agent.address, hre.ethers.parseUnits("1000", 18));
 
-      await vault.commitToDistribution(hre.ethers.parseUnits("1000", 18));
+      await vault.connect(agent).commitToDistribution(hre.ethers.parseUnits("1000", 18));
 
       expect(await vault.getAvailableForInvestors()).to.be.gt(0);
       expect(await vault.cumulativeRewardPerToken()).to.be.gt(0);
@@ -88,13 +93,14 @@ describe("RWARevenueVault + InvestorShareToken", function () {
 
   describe("claimYield()", function () {
     it("Allows investor to claim yield once", async function () {
-      const { vault, paymentToken, investor1, owner } = await loadFixture(deployFixture);
+      const { vault, paymentToken, investor1, owner, agent } = await loadFixture(deployFixture);
 
       await vault.mintShares(investor1.address, 100);
 
-      await paymentToken.approve(vault.target, hre.ethers.parseUnits("1000", 18));
-      await vault.depositRevenue(owner.address, hre.ethers.parseUnits("1000", 18));
-      await vault.commitToDistribution(hre.ethers.parseUnits("1000", 18));
+      await paymentToken.connect(owner).transfer(agent.address, hre.ethers.parseUnits("1000", 18));
+      await paymentToken.connect(agent).approve(vault.target, hre.ethers.parseUnits("1000", 18));
+      await vault.connect(agent).depositRevenue(agent.address, hre.ethers.parseUnits("1000", 18));
+      await vault.connect(agent).commitToDistribution(hre.ethers.parseUnits("1000", 18));
 
       const expectedReward = hre.ethers.parseUnits("975", 18);
 
@@ -106,13 +112,14 @@ describe("RWARevenueVault + InvestorShareToken", function () {
     });
 
     it("Prevents double-claiming", async function () {
-      const { vault, paymentToken, investor1, owner } = await loadFixture(deployFixture);
+      const { vault, paymentToken, investor1, owner, agent } = await loadFixture(deployFixture);
 
       await vault.mintShares(investor1.address, 100);
 
-      await paymentToken.approve(vault.target, hre.ethers.parseUnits("1000", 18));
-      await vault.depositRevenue(owner.address, hre.ethers.parseUnits("1000", 18));
-      await vault.commitToDistribution(hre.ethers.parseUnits("1000", 18));
+      await paymentToken.connect(owner).transfer(agent.address, hre.ethers.parseUnits("1000", 18));
+      await paymentToken.connect(agent).approve(vault.target, hre.ethers.parseUnits("1000", 18));
+      await vault.connect(agent).depositRevenue(agent.address, hre.ethers.parseUnits("1000", 18));
+      await vault.connect(agent).commitToDistribution(hre.ethers.parseUnits("1000", 18));
 
       await vault.connect(investor1).claimYield();
 

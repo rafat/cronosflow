@@ -4,7 +4,7 @@ import hre from "hardhat";
 
 describe("Integration: Multi-Investor Distribution", function () {
   async function fixture() {
-    const [admin, investorA, investorB, tenant] = await hre.ethers.getSigners();
+    const [admin, investorA, investorB, tenant, agent] = await hre.ethers.getSigners();
 
     const MockERC20 = await hre.ethers.getContractFactory("MockERC20");
     const usdc = await MockERC20.deploy("USD Coin", "USDC");
@@ -20,7 +20,7 @@ describe("Integration: Multi-Investor Distribution", function () {
     const Vault = await hre.ethers.getContractFactory("RWARevenueVault");
     const vault = await Vault.deploy();
 
-    await vault.initialize(admin.address, logic.target, usdc.target, registry.target, 1);
+    await vault.initialize(admin.address, agent.address, logic.target, usdc.target, registry.target, 1, admin.address);
 
     const Token = await hre.ethers.getContractFactory("InvestorShareToken");
     const token = await Token.deploy(
@@ -29,7 +29,8 @@ describe("Integration: Multi-Investor Distribution", function () {
       "RWA",
       hre.ethers.parseUnits("1000", 18),
       registry.target,
-      vault.target
+      vault.target,
+      admin.address
     );
 
     await vault.setTokenContracts(token.target);
@@ -37,15 +38,16 @@ describe("Integration: Multi-Investor Distribution", function () {
     await vault.mintShares(investorA.address, hre.ethers.parseUnits("600", 18));
     await vault.mintShares(investorB.address, hre.ethers.parseUnits("400", 18));
 
-    return { vault, token, usdc, investorA, investorB, tenant, admin };
+    return { vault, token, usdc, investorA, investorB, tenant, admin, agent };
   }
 
   it("distributes yield pro-rata across investors", async () => {
-    const { vault, usdc, investorA, investorB, tenant, admin } = await loadFixture(fixture);
+    const { vault, usdc, investorA, investorB, tenant, admin, agent } = await loadFixture(fixture);
 
-    await usdc.connect(tenant).approve(vault.target, hre.ethers.parseUnits("1000", 18));
-    await vault.connect(admin).depositRevenue(tenant.address, hre.ethers.parseUnits("1000", 18));
-    await vault.connect(admin).commitToDistribution(hre.ethers.parseUnits("1000", 18));
+    await usdc.connect(tenant).transfer(agent.address, hre.ethers.parseUnits("1000", 18));
+    await usdc.connect(agent).approve(vault.target, hre.ethers.parseUnits("1000", 18));
+    await vault.connect(agent).depositRevenue(agent.address, hre.ethers.parseUnits("1000", 18));
+    await vault.connect(agent).commitToDistribution(hre.ethers.parseUnits("1000", 18));
 
     await vault.connect(investorA).claimYield();
     await vault.connect(investorB).claimYield();
@@ -58,11 +60,12 @@ describe("Integration: Multi-Investor Distribution", function () {
   });
 
   it("claim order does not affect payouts", async () => {
-    const { vault, usdc, investorA, investorB, tenant, admin } = await loadFixture(fixture);
+    const { vault, usdc, investorA, investorB, tenant, admin, agent } = await loadFixture(fixture);
 
-    await usdc.connect(tenant).approve(vault.target, hre.ethers.parseUnits("1000", 18));
-    await vault.connect(admin).depositRevenue(tenant.address, hre.ethers.parseUnits("1000", 18));
-    await vault.connect(admin).commitToDistribution(hre.ethers.parseUnits("1000", 18));
+    await usdc.connect(tenant).transfer(agent.address, hre.ethers.parseUnits("1000", 18));
+    await usdc.connect(agent).approve(vault.target, hre.ethers.parseUnits("1000", 18));
+    await vault.connect(agent).depositRevenue(agent.address, hre.ethers.parseUnits("1000", 18));
+    await vault.connect(agent).commitToDistribution(hre.ethers.parseUnits("1000", 18));
 
     await vault.connect(investorB).claimYield();
     await vault.connect(investorA).claimYield();

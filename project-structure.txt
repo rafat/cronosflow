@@ -1,0 +1,179 @@
+.
+├── contracts
+│   ├── artifacts
+│   │   ├── @openzeppelin
+│   │   │   └── contracts
+│   │   │       ├── access
+│   │   │       │   ├── AccessControl.sol
+│   │   │       │   └── IAccessControl.sol
+│   │   │       ├── interfaces
+│   │   │       │   └── draft-IERC6093.sol
+│   │   │       ├── token
+│   │   │       │   └── ERC20
+│   │   │       └── utils
+│   │   │           ├── Context.sol
+│   │   │           ├── introspection
+│   │   │           ├── Pausable.sol
+│   │   │           └── ReentrancyGuard.sol
+│   │   ├── build-info
+│   │   │   ├── 5b19ab00269b80648feb154dde4e8842.json
+│   │   │   ├── b20cd23d18f7a1d9b5e820b97434a583.json
+│   │   │   ├── be58b013fcaad88fcb9337816eb31b1c.json
+│   │   │   ├── eedfe29b8ade6916079e1ca862596240.json
+│   │   │   └── fce0e1168d8f6854946e3346501e8c68.json
+│   │   └── contracts
+│   │       ├── interface
+│   │       │   └── ICashFlowLogic.sol
+│   │       │       ├── ICashFlowLogic.dbg.json
+│   │       │       └── ICashFlowLogic.json
+│   │       ├── InvestorShareToken.sol
+│   │       │   ├── InvestorShareToken.dbg.json
+│   │       │   ├── InvestorShareToken.json
+│   │       │   ├── IRWAAssetRegistry.dbg.json
+│   │       │   ├── IRWAAssetRegistry.json
+│   │       │   ├── IRWARevenueVault.dbg.json
+│   │       │   └── IRWARevenueVault.json
+│   │       ├── Lock.sol
+│   │       │   ├── Lock.dbg.json
+│   │       │   └── Lock.json
+│   │       ├── mocks
+│   │       │   ├── MockCashFlowLogic.sol
+│   │       │   │   ├── MockCashFlowLogic.dbg.json
+│   │       │   │   └── MockCashFlowLogic.json
+│   │       │   ├── MockERC20.sol
+│   │       │   │   ├── MockERC20.dbg.json
+│   │       │   │   └── MockERC20.json
+│   │       │   └── MockRegistry.sol
+│   │       │       ├── MockRegistry.dbg.json
+│   │       │       └── MockRegistry.json
+│   │       ├── RentalCashFlowLogic.sol
+│   │       │   ├── RentalCashFlowLogic.dbg.json
+│   │       │   └── RentalCashFlowLogic.json
+│   │       ├── RWAAssetRegistry.sol
+│   │       │   ├── RWAAssetRegistry.dbg.json
+│   │       │   └── RWAAssetRegistry.json
+│   │       ├── RWACommonTypes.sol
+│   │       │   ├── RWACommonTypes.dbg.json
+│   │       │   └── RWACommonTypes.json
+│   │       ├── RWARevenueVault.sol
+│   │       │   ├── RWARevenueVault.dbg.json
+│   │       │   └── RWARevenueVault.json
+│   │       └── test
+│   │           └── DefaultingLogicMock.sol
+│   │               ├── DefaultingLogicMock.dbg.json
+│   │               └── DefaultingLogicMock.json
+│   ├── cache
+│   │   └── solidity-files-cache.json
+│   ├── contracts
+│   │   ├── interface
+│   │   │   └── ICashFlowLogic.sol
+│   │   ├── InvestorShareToken.sol
+│   │   ├── Lock.sol
+│   │   ├── mocks
+│   │   │   ├── MockCashFlowLogic.sol
+│   │   │   ├── MockERC20.sol
+│   │   │   └── MockRegistry.sol
+│   │   ├── RentalCashFlowLogic.sol
+│   │   ├── RWAAssetRegistry.sol
+│   │   ├── RWACommonTypes.sol
+│   │   ├── RWARevenueVault.sol
+│   │   └── test
+│   │       └── DefaultingLogicMock.sol
+│   ├── hardhat.config.ts
+│   ├── ignition
+│   │   └── modules
+│   │       └── Lock.ts
+│   ├── package-lock.json
+│   ├── package.json
+│   ├── README.md
+│   ├── test
+│   │   ├── e2e.ts
+│   │   ├── integrations.ts
+│   │   ├── RentalCashFlowLogic.ts
+│   │   ├── RWAAssetRegistry.ts
+│   │   └── RWARevenueVault.ts
+│   ├── test_debug.js
+│   ├── tsconfig.json
+│   └── typechain-types
+│       ├── @openzeppelin
+│       │   ├── contracts
+│       │   │   ├── access
+│       │   │   │   ├── AccessControl.ts
+│       │   │   │   ├── IAccessControl.ts
+│       │   │   │   └── index.ts
+│       │   │   ├── index.ts
+│       │   │   ├── interfaces
+│       │   │   │   ├── draft-IERC6093.sol
+│       │   │   │   └── index.ts
+│       │   │   ├── token
+│       │   │   │   ├── ERC20
+│       │   │   │   └── index.ts
+│       │   │   └── utils
+│       │   │       ├── index.ts
+│       │   │       ├── introspection
+│       │   │       ├── Pausable.ts
+│       │   │       └── ReentrancyGuard.ts
+│       │   └── index.ts
+│       ├── common.ts
+│       ├── contracts
+│       │   ├── index.ts
+│       │   ├── interface
+│       │   │   ├── ICashFlowLogic.ts
+│       │   │   └── index.ts
+│       │   ├── InvestorShareToken.sol
+│       │   │   ├── index.ts
+│       │   │   ├── InvestorShareToken.ts
+│       │   │   ├── IRWAAssetRegistry.ts
+│       │   │   └── IRWARevenueVault.ts
+│       │   ├── Lock.ts
+│       │   ├── mocks
+│       │   │   ├── index.ts
+│       │   │   ├── MockCashFlowLogic.ts
+│       │   │   ├── MockERC20.ts
+│       │   │   └── MockRegistry.ts
+│       │   ├── RentalCashFlowLogic.ts
+│       │   ├── RWAAssetRegistry.ts
+│       │   ├── RWARevenueVault.ts
+│       │   └── test
+│       │       ├── DefaultingLogicMock.ts
+│       │       └── index.ts
+│       ├── factories
+│       │   ├── @openzeppelin
+│       │   │   ├── contracts
+│       │   │   │   ├── access
+│       │   │   │   ├── index.ts
+│       │   │   │   ├── interfaces
+│       │   │   │   ├── token
+│       │   │   │   └── utils
+│       │   │   └── index.ts
+│       │   ├── contracts
+│       │   │   ├── index.ts
+│       │   │   ├── interface
+│       │   │   │   ├── ICashFlowLogic__factory.ts
+│       │   │   │   └── index.ts
+│       │   │   ├── InvestorShareToken.sol
+│       │   │   │   ├── index.ts
+│       │   │   │   ├── InvestorShareToken__factory.ts
+│       │   │   │   ├── IRWAAssetRegistry__factory.ts
+│       │   │   │   └── IRWARevenueVault__factory.ts
+│       │   │   ├── Lock__factory.ts
+│       │   │   ├── mocks
+│       │   │   │   ├── index.ts
+│       │   │   │   ├── MockCashFlowLogic__factory.ts
+│       │   │   │   ├── MockERC20__factory.ts
+│       │   │   │   └── MockRegistry__factory.ts
+│       │   │   ├── RentalCashFlowLogic__factory.ts
+│       │   │   ├── RWAAssetRegistry__factory.ts
+│       │   │   ├── RWARevenueVault__factory.ts
+│       │   │   └── test
+│       │   │       ├── DefaultingLogicMock__factory.ts
+│       │   │       └── index.ts
+│       │   └── index.ts
+│       ├── hardhat.d.ts
+│       └── index.ts
+├── frontend
+├── Modular_Architecture_Complete.md
+├── project-structure.txt
+└── RWAAssetRegistry_Enhanced.md
+
+69 directories, 108 files

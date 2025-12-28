@@ -4,6 +4,8 @@ import hre from "hardhat";
 
 describe("RentalCashFlowLogic", function () {
   async function deployFixture() {
+    const [registrySigner] = await hre.ethers.getSigners();
+
     const Logic = await hre.ethers.getContractFactory("RentalCashFlowLogic");
     const logic = await Logic.deploy();
 
@@ -11,20 +13,19 @@ describe("RentalCashFlowLogic", function () {
     const paymentInterval = 30 * 24 * 60 * 60;
     const gracePeriodDays = 5;
 
-    const firstDue = await time.latest();
+    const firstDue = await time.latest() + 60;
     const leaseEndDate = firstDue + 180 * 24 * 60 * 60; // ~6 months
 
-    const Registry = await hre.ethers.getContractFactory("RWAAssetRegistry");
-    const registry = await Registry.deploy();
+    const registry = registrySigner.address;
 
     const initData = hre.ethers.AbiCoder.defaultAbiCoder().encode(
       ["uint256", "uint256", "uint256", "uint256", "uint256", "address"],
-      [rentAmount, paymentInterval, firstDue, gracePeriodDays, leaseEndDate, registry.target]
+      [rentAmount, paymentInterval, firstDue, gracePeriodDays, leaseEndDate, registry]
     );
 
     await logic.initialize(initData);
 
-    return { logic, rentAmount, paymentInterval, gracePeriodDays, leaseEndDate, firstDue };
+    return { logic, rentAmount, paymentInterval, gracePeriodDays, leaseEndDate, firstDue, registrySigner };
   }
 
   describe("Initialization", function () {
@@ -41,18 +42,18 @@ describe("RentalCashFlowLogic", function () {
 
   describe("Payments", function () {
     it("accepts rent payment for current period (if processPayment not restricted)", async function () {
-      const { logic, rentAmount } = await loadFixture(deployFixture);
+      const { logic, rentAmount, registrySigner } = await loadFixture(deployFixture);
 
-      await expect(logic.processPayment(rentAmount, await time.latest())).not.to.be.reverted;
+      await expect(logic.connect(registrySigner).processPayment(rentAmount, await time.latest())).not.to.be.reverted;
       expect(await logic.getTotalReceived()).to.equal(rentAmount);
     });
-  });
+    });
 
   describe("Late & default logic (preview)", function () {
     it("previews GRACE_PERIOD after due date", async function () {
-      const { logic, paymentInterval } = await loadFixture(deployFixture);
+      const { logic, firstDue, paymentInterval, gracePeriodDays } = await loadFixture(deployFixture);
 
-      await time.increase(paymentInterval + 1);
+      await time.increaseTo(firstDue + 1);
 
       const [, health] = await logic.previewDefault(await time.latest());
       expect(health).to.equal(1); // GRACE_PERIOD

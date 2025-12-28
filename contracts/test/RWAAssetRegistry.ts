@@ -7,7 +7,7 @@ describe("RWAAssetRegistry", function () {
     const [admin, factory, compliance, payment] = await hre.ethers.getSigners();
 
     const Registry = await hre.ethers.getContractFactory("RWAAssetRegistry");
-    const registry = await Registry.deploy();
+    const registry = await Registry.deploy(admin.address);
 
     await registry.grantRole(await registry.ASSET_FACTORY_ROLE(), factory.address);
     await registry.grantRole(await registry.COMPLIANCE_ROLE(), compliance.address);
@@ -42,8 +42,6 @@ describe("RWAAssetRegistry", function () {
       const assetId = await registry.connect(factory).registerAsset.staticCall(0, factory.address, 1000, "ipfs");
       await registry.connect(factory).registerAsset(0, factory.address, 1000, "ipfs");
 
-      await registry.connect(compliance).whitelistAsset(assetId);
-
       await registry.connect(factory).linkContracts(
         assetId,
         hre.ethers.Wallet.createRandom().address,
@@ -64,8 +62,6 @@ describe("RWAAssetRegistry", function () {
 
       const assetId = await registry.connect(factory).registerAsset.staticCall(0, factory.address, 1000, "ipfs");
       await registry.connect(factory).registerAsset(0, factory.address, 1000, "ipfs");
-
-      await registry.connect(compliance).whitelistAsset(assetId);
 
       // IMPORTANT: checkAndTriggerDefault now requires a logic contract.
       // So this unit test must deploy a simple logic mock that defaults.
