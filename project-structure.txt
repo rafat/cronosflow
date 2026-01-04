@@ -17,9 +17,8 @@
 │   │   │           └── ReentrancyGuard.sol
 │   │   ├── build-info
 │   │   │   ├── 5b19ab00269b80648feb154dde4e8842.json
-│   │   │   ├── b20cd23d18f7a1d9b5e820b97434a583.json
+│   │   │   ├── 7df2be24a30615084d187363846116df.json
 │   │   │   ├── be58b013fcaad88fcb9337816eb31b1c.json
-│   │   │   ├── eedfe29b8ade6916079e1ca862596240.json
 │   │   │   └── fce0e1168d8f6854946e3346501e8c68.json
 │   │   └── contracts
 │   │       ├── interface
@@ -56,6 +55,8 @@
 │   │       │   ├── RWACommonTypes.dbg.json
 │   │       │   └── RWACommonTypes.json
 │   │       ├── RWARevenueVault.sol
+│   │       │   ├── IRWAAssetRegistryView.dbg.json
+│   │       │   ├── IRWAAssetRegistryView.json
 │   │       │   ├── RWARevenueVault.dbg.json
 │   │       │   └── RWARevenueVault.json
 │   │       └── test
@@ -82,7 +83,8 @@
 │   ├── hardhat.config.ts
 │   ├── ignition
 │   │   └── modules
-│   │       └── Lock.ts
+│   │       ├── Lock.ts
+│   │       └── RWALifecycle.ts
 │   ├── package-lock.json
 │   ├── package.json
 │   ├── README.md
@@ -133,6 +135,10 @@
 │       │   │   └── MockRegistry.ts
 │       │   ├── RentalCashFlowLogic.ts
 │       │   ├── RWAAssetRegistry.ts
+│       │   ├── RWARevenueVault.sol
+│       │   │   ├── index.ts
+│       │   │   ├── IRWAAssetRegistryView.ts
+│       │   │   └── RWARevenueVault.ts
 │       │   ├── RWARevenueVault.ts
 │       │   └── test
 │       │       ├── DefaultingLogicMock.ts
@@ -165,6 +171,10 @@
 │       │   │   ├── RentalCashFlowLogic__factory.ts
 │       │   │   ├── RWAAssetRegistry__factory.ts
 │       │   │   ├── RWARevenueVault__factory.ts
+│       │   │   ├── RWARevenueVault.sol
+│       │   │   │   ├── index.ts
+│       │   │   │   ├── IRWAAssetRegistryView__factory.ts
+│       │   │   │   └── RWARevenueVault__factory.ts
 │       │   │   └── test
 │       │   │       ├── DefaultingLogicMock__factory.ts
 │       │   │       └── index.ts
@@ -172,8 +182,85 @@
 │       ├── hardhat.d.ts
 │       └── index.ts
 ├── frontend
+│   ├── app
+│   │   ├── admin
+│   │   │   └── assets
+│   │   │       └── new
+│   │   │           └── page.tsx
+│   │   ├── api
+│   │   │   ├── admin
+│   │   │   │   └── assets
+│   │   │   │       └── create
+│   │   │   ├── agent
+│   │   │   │   └── run
+│   │   │   │       └── route.ts
+│   │   │   ├── assets
+│   │   │   │   ├── [assetId]
+│   │   │   │   │   ├── route.ts
+│   │   │   │   │   └── state
+│   │   │   │   └── route.ts
+│   │   │   ├── cron
+│   │   │   │   └── tick
+│   │   │   │       └── route.ts
+│   │   │   ├── payments
+│   │   │   │   └── request
+│   │   │   │       └── route.ts
+│   │   │   └── webhooks
+│   │   │       └── x402
+│   │   │           └── route.ts
+│   │   ├── assets
+│   │   │   ├── [assetId]
+│   │   │   │   └── page.tsx
+│   │   │   └── page.tsx
+│   │   ├── favicon.ico
+│   │   ├── globals.css
+│   │   ├── layout.tsx
+│   │   └── page.tsx
+│   ├── drizzle.config.ts
+│   ├── eslint.config.mjs
+│   ├── next-env.d.ts
+│   ├── next.config.ts
+│   ├── package-lock.json
+│   ├── package.json
+│   ├── postcss.config.mjs
+│   ├── public
+│   │   ├── file.svg
+│   │   ├── globe.svg
+│   │   ├── next.svg
+│   │   ├── vercel.svg
+│   │   └── window.svg
+│   ├── README.md
+│   ├── scripts
+│   │   └── copy-artifacts.mjs
+│   ├── src
+│   │   ├── contracts
+│   │   │   ├── InvestorShareToken.json
+│   │   │   ├── MockERC20.json
+│   │   │   ├── RentalCashFlowLogic.json
+│   │   │   ├── RWAAssetRegistry.json
+│   │   │   └── RWARevenueVault.json
+│   │   └── lib
+│   │       ├── agents
+│   │       │   ├── orchestrator.ts
+│   │       │   ├── prompts.ts
+│   │       │   ├── schemas.ts
+│   │       │   └── tools.ts
+│   │       ├── chain
+│   │       │   ├── clients.ts
+│   │       │   ├── config.ts
+│   │       │   ├── deploy.ts
+│   │       │   ├── read.ts
+│   │       │   └── write.ts
+│   │       ├── contracts.ts
+│   │       ├── db
+│   │       │   ├── index.ts
+│   │       │   └── schema.ts
+│   │       └── doc
+│   │           ├── extractText.ts
+│   │           └── parseTerms.ts
+│   └── tsconfig.json
 ├── Modular_Architecture_Complete.md
 ├── project-structure.txt
 └── RWAAssetRegistry_Enhanced.md
 
-69 directories, 108 files
+101 directories, 163 files
