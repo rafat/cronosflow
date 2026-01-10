@@ -13,7 +13,6 @@ describe("Integration: Multi-Investor Distribution", function () {
     const Registry = await hre.ethers.getContractFactory("MockRegistry");
     const registry = await Registry.deploy();
 
-    // NEW: mock logic returning expected periodic payment
     const MockLogic = await hre.ethers.getContractFactory("MockCashFlowLogic");
     const logic = await MockLogic.deploy(hre.ethers.parseUnits("1000", 18));
 

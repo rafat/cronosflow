@@ -46,16 +46,19 @@ describe("E2E: Rental RWA Lifecycle", function () {
     const logic = await Logic.deploy();
 
     const rent = hre.ethers.parseUnits("1000", 18);
-    const interval = 30 * 24 * 60 * 60;
-    const graceDays = 5;
 
-    const firstDue = await time.latest() + 60;
-    const leaseEnd = firstDue + 6 * interval;
+    const DAY = 24 * 60 * 60;
+    const timeUnitSeconds = DAY;
+    const interval = 30 * timeUnitSeconds; // 30 days
+    const graceUnits = 5; // 5 days
 
-    // IMPORTANT: now includes registry address (6th param)
+    const firstDue = (await time.latest()) + 60; // 1 minute in the future
+    const leaseEnd = firstDue + 6 * interval;    // 6 periods
+
+    // NEW: includes timeUnitSeconds as 6th arg, registry as 7th
     const initData = hre.ethers.AbiCoder.defaultAbiCoder().encode(
-      ["uint256", "uint256", "uint256", "uint256", "uint256", "address"],
-      [rent, interval, firstDue, graceDays, leaseEnd, registry.target]
+      ["uint256", "uint256", "uint256", "uint256", "uint256", "uint256", "address"],
+      [rent, interval, firstDue, graceUnits, leaseEnd, timeUnitSeconds, registry.target]
     );
     await logic.initialize(initData);
 
@@ -65,7 +68,15 @@ describe("E2E: Rental RWA Lifecycle", function () {
     const Vault = await hre.ethers.getContractFactory("RWARevenueVault");
     const vault = await Vault.deploy();
 
-    await vault.initialize(admin.address, agent.address, logic.target, usdc.target, registry.target, assetId, admin.address);
+    await vault.initialize(
+      admin.address,
+      agent.address,
+      logic.target,
+      usdc.target,
+      registry.target,
+      assetId,
+      admin.address
+    );
     await vault.grantRole(await vault.PAYMENT_ROLE(), paymentCollector.address);
 
     // -------------------------
@@ -104,10 +115,11 @@ describe("E2E: Rental RWA Lifecycle", function () {
       paymentCollector,
       rent,
       interval,
-      graceDays,
+      graceUnits,
       firstDue,
       admin,
-      agent
+      agent,
+      DAY
     };
   }
 
@@ -123,13 +135,12 @@ describe("E2E: Rental RWA Lifecycle", function () {
       paymentCollector,
       rent,
       interval,
-      graceDays,
+      graceUnits,
       firstDue,
       admin,
-      agent
+      agent,
+      DAY
     } = await loadFixture(deployFixture);
-
-    const DAY = 24 * 60 * 60;
 
     // -------------------------
     // Tenant pays rent into vault
@@ -137,9 +148,6 @@ describe("E2E: Rental RWA Lifecycle", function () {
     await usdc.connect(tenant).approve(vault.target, rent);
     await vault.connect(paymentCollector).depositRevenue(tenant.address, rent);
 
-    // NOTE:
-    // If you later restrict `processPayment()` to onlyRegistry/onlyVault,
-    // you'll need to route this call through that authorized component.
     await registry.connect(paymentCollector).recordPayment(assetId, rent);
 
     // Commit to distribution (checks against logic.getSchedule().expected)
@@ -153,20 +161,19 @@ describe("E2E: Rental RWA Lifecycle", function () {
 
     // -------------------------
     // Miss two rent periods → registry triggers default
-    // Use exact timestamps (increaseTo) to avoid ambiguity.
     // -------------------------
 
     // Past grace for period 1 (=> LATE)
-  const t1 = firstDue + interval + graceDays * DAY + 1;
-  await time.increaseTo(t1);
-  await registry.checkAndTriggerDefault(assetId);
+    const t1 = firstDue + interval + graceUnits * DAY + 1;
+    await time.increaseTo(t1);
+    await registry.checkAndTriggerDefault(assetId);
 
-  // Past grace for period 2 (=> DEFAULTED)
-  const t2 = firstDue + 2 * interval + graceDays * DAY + 1;
-  await time.increaseTo(t2);
-  await registry.checkAndTriggerDefault(assetId);
+    // Past grace for period 2 (=> DEFAULTED)
+    const t2 = firstDue + 2 * interval + graceUnits * DAY + 1;
+    await time.increaseTo(t2);
+    await registry.checkAndTriggerDefault(assetId);
 
-  const asset = await registry.assets(assetId);
-  expect(asset.currentStatus).to.equal(4); // DEFAULTED
+    const asset = await registry.assets(assetId);
+    expect(asset.currentStatus).to.equal(4); // DEFAULTED
   });
 });

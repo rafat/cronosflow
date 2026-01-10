@@ -52,19 +52,17 @@ describe("RWAAssetRegistry", function () {
       await expect(registry.connect(compliance).activateAsset(assetId)).not.to.be.reverted;
 
       const asset = await registry.assets(assetId);
-      expect(asset.currentStatus).to.equal(2); // ACTIVE (NEW INDEX)
+      expect(asset.currentStatus).to.equal(2); // ACTIVE
     });
   });
 
   describe("Default detection", function () {
-    it("marks asset as DEFAULTED after missed payments", async function () {
+    it("marks asset as DEFAULTED after missed payments (using defaulting mock)", async function () {
       const { registry, factory, payment, compliance } = await loadFixture(deployFixture);
 
       const assetId = await registry.connect(factory).registerAsset.staticCall(0, factory.address, 1000, "ipfs");
       await registry.connect(factory).registerAsset(0, factory.address, 1000, "ipfs");
 
-      // IMPORTANT: checkAndTriggerDefault now requires a logic contract.
-      // So this unit test must deploy a simple logic mock that defaults.
       const DefaultingLogic = await hre.ethers.getContractFactory("DefaultingLogicMock");
       const logic = await DefaultingLogic.deploy();
 
@@ -77,11 +75,42 @@ describe("RWAAssetRegistry", function () {
 
       await registry.connect(compliance).activateAsset(assetId);
 
-      // Jump ahead twice to trigger default in the mock (or in your real rental logic you’d do it differently)
       await registry.connect(payment).checkAndTriggerDefault(assetId);
 
       const asset = await registry.assets(assetId);
-      expect(asset.currentStatus).to.equal(4); // DEFAULTED (NEW INDEX)
+      expect(asset.currentStatus).to.equal(4); // DEFAULTED
+    });
+  });
+
+  describe("Schedule sync with logic on recordPayment", function () {
+    it("updates nextPaymentDueDate and expectedMonthlyPayment from logic", async function () {
+      const { registry, factory, payment, compliance } = await loadFixture(deployFixture);
+
+      const assetId = await registry.connect(factory).registerAsset.staticCall(0, factory.address, 1000, "ipfs");
+      await registry.connect(factory).registerAsset(0, factory.address, 1000, "ipfs");
+
+      // Mock logic with a fixed schedule via MockCashFlowLogic
+      const MockLogic = await hre.ethers.getContractFactory("MockCashFlowLogic");
+      const expectedMonthly = hre.ethers.parseUnits("1000", 18);
+      const logic = await MockLogic.deploy(expectedMonthly);
+
+      await registry.connect(factory).linkContracts(
+        assetId,
+        logic.target,
+        hre.ethers.Wallet.createRandom().address,
+        hre.ethers.Wallet.createRandom().address
+      );
+
+      await registry.connect(compliance).activateAsset(assetId);
+
+      // recordPayment should call logic.processPayment and then sync schedule via getSchedule()
+      await registry.connect(payment).recordPayment(assetId, expectedMonthly);
+
+      const asset = await registry.assets(assetId);
+      // MockCashFlowLogic.getSchedule() returns (0, expected, 0)
+      expect(asset.expectedMonthlyPayment).to.equal(expectedMonthly);
+      expect(asset.nextPaymentDueDate).to.equal(0);
+      expect(asset.expectedMaturityDate).to.equal(0);
     });
   });
 });

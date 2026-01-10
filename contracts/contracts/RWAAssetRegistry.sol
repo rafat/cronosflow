@@ -108,7 +108,7 @@ contract RWAAssetRegistry is AccessControl, Pausable, ReentrancyGuard {
         newAsset.lastValuationDate = block.timestamp;
         newAsset.missedPayments = 0;
         newAsset.daysInDefault = 0;
-        newAsset.nextPaymentDueDate = block.timestamp + 30 days;
+        // newAsset.nextPaymentDueDate will be derived from the logic contract schedule
 
         emit AssetRegistered(assetId, _assetType, _originator, _assetValue);
         return assetId;
@@ -172,7 +172,17 @@ contract RWAAssetRegistry is AccessControl, Pausable, ReentrancyGuard {
         asset.lastPaymentDate = block.timestamp;
         asset.accumulatedYield += _paymentAmount;
         asset.daysInDefault = 0;
-        asset.nextPaymentDueDate = block.timestamp + 30 days;
+
+        // Sync schedule with logic
+        (
+            uint256 nextDueDate,
+            uint256 expectedPeriodicPayment,
+            uint256 maturityDate
+        ) = ICashFlowLogic(asset.logicContract).getSchedule();
+
+        asset.nextPaymentDueDate = nextDueDate;
+        asset.expectedMonthlyPayment = expectedPeriodicPayment;
+        asset.expectedMaturityDate = maturityDate;
 
         if (_paymentAmount >= asset.expectedMonthlyPayment) {
             asset.missedPayments = 0;

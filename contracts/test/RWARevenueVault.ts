@@ -13,7 +13,6 @@ describe("RWARevenueVault + InvestorShareToken", function () {
     const paymentToken = await ERC20.deploy("USD Coin", "USDC");
     await paymentToken.mint(owner.address, hre.ethers.parseUnits("10000", 18));
 
-    // NEW: mock logic required because vault.commitToDistribution calls getSchedule()
     const MockLogic = await hre.ethers.getContractFactory("MockCashFlowLogic");
     const logic = await MockLogic.deploy(hre.ethers.parseUnits("1000", 18));
 
@@ -84,10 +83,13 @@ describe("RWARevenueVault + InvestorShareToken", function () {
       await paymentToken.connect(agent).approve(vault.target, hre.ethers.parseUnits("1000", 18));
       await vault.connect(agent).depositRevenue(agent.address, hre.ethers.parseUnits("1000", 18));
 
+      expect(await vault.distributionStarted()).to.equal(false);
+
       await vault.connect(agent).commitToDistribution(hre.ethers.parseUnits("1000", 18));
 
       expect(await vault.getAvailableForInvestors()).to.be.gt(0);
       expect(await vault.cumulativeRewardPerToken()).to.be.gt(0);
+      expect(await vault.distributionStarted()).to.equal(true);
     });
   });
 
