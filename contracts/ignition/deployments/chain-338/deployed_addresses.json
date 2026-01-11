@@ -2,5 +2,6 @@
   "RWALifecycleModule#RWAAssetRegistry": "0xF35e93EaeE4c6dCfA24eb0BD6aE1164c8a0ffB64",
   "RWALifecycleModule#RWARevenueVault": "0xFF3260a3aab725b4BbBf9A94A57A5718196E5a73",
   "RWALifecycleModule#RentalCashFlowLogic": "0x0fD55d06B382C72d8b95f5Bf9Ae1682D079B79bB",
-  "RWALifecycleModule#InvestorShareToken": "0xa894C0c4553969072B914DA7E1a1a223624b2530"
+  "RWALifecycleModule#InvestorShareToken": "0xa894C0c4553969072B914DA7E1a1a223624b2530",
+  "RegistryModule#RWAAssetRegistry": "0xECfcBe5d9F89fAB1818c9D582b2d54c9fFf8E0Eb"
 }

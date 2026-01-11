@@ -42,6 +42,7 @@ export type LogicPreview = {
   cashflowHealth: number;
   daysPastDue: bigint;
   periodIndex: bigint;
+  timeUnit: bigint;
 };
 
 export type VaultState = {
@@ -95,18 +96,26 @@ export async function readLogicSchedule(logic: `0x${string}`): Promise<LogicSche
 
 export async function readLogicPreview(logic: `0x${string}`): Promise<LogicPreview> {
   const now = BigInt(Math.floor(Date.now() / 1000));
-  const preview = await publicClient.readContract({
-    address: logic,
-    abi: RentalLogic.abi,
-    functionName: "previewDefault",
-    args: [now],
-  }) as [number, number, bigint, bigint];
-  // returns (AssetStatus, CashflowHealth, daysPastDue, period)
+  const [preview, timeUnit] = await Promise.all([
+    publicClient.readContract({
+      address: logic,
+      abi: RentalLogic.abi,
+      functionName: "previewDefault",
+      args: [now],
+    }),
+    publicClient.readContract({
+      address: logic,
+      abi: RentalLogic.abi,
+      functionName: "timeUnit",
+    }),
+  ]) as [[number, number, bigint, bigint], bigint];
+  // previewDefault returns (AssetStatus, CashflowHealth, daysPastDue, period)
   return {
     assetStatus: preview[0] as number,
     cashflowHealth: preview[1] as number,
     daysPastDue: preview[2] as bigint,
     periodIndex: preview[3] as bigint,
+    timeUnit: timeUnit as bigint,
   };
 }
 

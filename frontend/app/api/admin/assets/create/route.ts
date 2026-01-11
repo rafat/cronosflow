@@ -8,17 +8,18 @@ import { Registry, RentalLogic, Vault, ShareToken } from "@/src/lib/contracts";
 const CreateSchema = z.object({
   name: z.string().min(1),
   symbol: z.string().min(1).max(12),
-  maxSupply: z.string(),     // "1000" human units
-  assetValue: z.string(),    // "1000000"
+  maxSupply: z.string(),
+  assetValue: z.string(),
   ipfsHash: z.string().min(1),
 
-  rentAmount: z.string(),    // "1000"
-  intervalDays: z.number().int().positive().default(30),
-  graceDays: z.number().int().nonnegative().default(5),
-  months: z.number().int().positive().default(6),
+  rentAmount: z.string(),
+  interval: z.number().int().positive(),
+  grace: z.number().int().nonnegative(),
+  months: z.number().int().positive(),
+  timeUnitSeconds: z.number().int().positive(),
 
   originator: z.string().optional(),
-  paymentToken: z.string().optional()
+  paymentToken: z.string().optional(),
 });
 
 function requireAdmin(req: Request) {
@@ -44,16 +45,18 @@ export async function POST(req: Request) {
 
     const originator = (body.originator ?? agentAccount.address) as `0x${string}`;
 
-    // Demo conversions assume 18 decimals
+    // --- Time & Money Conversions ---
     const rent = BigInt(Math.floor(Number(body.rentAmount))) * BigInt(10) ** BigInt(18);
     const maxSupply = BigInt(Math.floor(Number(body.maxSupply))) * BigInt(10) ** BigInt(18);
 
-    const intervalSeconds = BigInt(body.intervalDays) * BigInt(24) * BigInt(60) * BigInt(60);
-    const graceDays = BigInt(body.graceDays);
+    const timeUnitSeconds = BigInt(body.timeUnitSeconds);
+    const intervalSeconds = BigInt(body.interval) * timeUnitSeconds;
+    const graceUnits = BigInt(body.grace);
 
     const now = BigInt(Math.floor(Date.now() / 1000));
-    const firstDue = now + BigInt(10) * BigInt(60);
+    const firstDue = now + BigInt(60); // First payment due in ~60s
     const leaseEnd = firstDue + BigInt(body.months) * intervalSeconds;
+    // --- End Time & Money Conversions ---
 
     // 1) KYC originator (demo)
     const kycHash = await walletClient.writeContract({
@@ -90,8 +93,8 @@ export async function POST(req: Request) {
     });
 
     const initData = encodeAbiParameters(
-      parseAbiParameters("uint256,uint256,uint256,uint256,uint256,address"),
-      [rent, intervalSeconds, firstDue, graceDays, leaseEnd, registryAddress]
+      parseAbiParameters("uint256, uint256, uint256, uint256, uint256, uint256, address"),
+      [rent, intervalSeconds, firstDue, graceUnits, leaseEnd, timeUnitSeconds, registryAddress]
     );
 
     const logicInitHash = await walletClient.writeContract({
@@ -185,7 +188,8 @@ export async function POST(req: Request) {
         intervalSeconds: intervalSeconds.toString(),
         firstDue: firstDue.toString(),
         leaseEnd: leaseEnd.toString(),
-        graceDays: graceDays.toString(),
+        graceUnits: graceUnits.toString(),
+        timeUnitSeconds: timeUnitSeconds.toString(),
       },
     });
   } catch (err: any) {

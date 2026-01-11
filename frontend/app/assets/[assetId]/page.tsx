@@ -1,33 +1,88 @@
+"use client";
+
 import Link from "next/link";
+import { useState, useEffect } from "react";
 
 interface Params {
   params: { assetId: string };
 }
 
-async function fetchAsset(assetId: string) {
-  const res = await fetch(`${process.env.NEXT_PUBLIC_BASE_URL ?? ""}/api/assets/${assetId}`, {
-    cache: "no-store",
-  });
-  if (!res.ok) throw new Error("Asset not found");
-  return res.json();
-}
+// Note: In a real app, you'd use a dedicated data fetching library like SWR or React Query
+// and not fetch data directly in a client component like this on every render.
+// This is simplified for the demo.
+export default function AssetDetailPage({ params }: Params) {
+  const [asset, setAsset] = useState<any>(null);
+  const [state, setState] = useState<any>(null);
+  const [err, setErr] = useState<string | null>(null);
 
-async function fetchState(assetId: string) {
-  const res = await fetch(
-    `${process.env.NEXT_PUBLIC_BASE_URL ?? ""}/api/assets/${assetId}/state`,
-    { cache: "no-store" },
-  );
-  if (!res.ok) throw new Error("Failed to load state");
-  return res.json();
-}
+  const [runRes, setRunRes] = useState<any>(null);
+  const [runErr, setRunErr] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
 
-export default async function AssetDetailPage({ params }: Params) {
-  const asset = await fetchAsset(params.assetId);
-  const state = await fetchState(params.assetId);
+  useEffect(() => {
+    async function fetchAsset(assetId: string) {
+      const res = await fetch(`/api/assets/${assetId}`);
+      if (!res.ok) throw new Error("Asset not found");
+      return res.json();
+    }
+
+    async function fetchState(assetId: string) {
+      const res = await fetch(`/api/assets/${assetId}/state`);
+      if (!res.ok) throw new Error("Failed to load state");
+      return res.json();
+    }
+
+    setErr(null);
+    Promise.all([fetchAsset(params.assetId), fetchState(params.assetId)])
+      .then(([assetData, stateData]) => {
+        setAsset(assetData);
+        setState(stateData);
+      })
+      .catch((e) => setErr(e.message));
+  }, [params.assetId]);
+
+  async function onRunAgent() {
+    setLoading(true);
+    setRunErr(null);
+    setRunRes(null);
+
+    try {
+      const res = await fetch("/api/agent/run", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-admin-secret": prompt("Enter ADMIN_SECRET") || "",
+        },
+        body: JSON.stringify({ assetId: params.assetId }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "Agent run failed");
+      setRunRes(json);
+    } catch (e: any) {
+      setRunErr(e.message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  if (err) {
+    return <div className="p-6">Error: {err}</div>;
+  }
+
+  if (!asset || !state) {
+    return <div className="p-6">Loading...</div>;
+  }
 
   const schedule = state.logicSchedule;
   const vault = state.vault;
   const preview = state.logicPreview;
+
+  let timeUnitLabel = "seconds";
+  if (Number(preview.timeUnit) === 60) {
+    timeUnitLabel = "minutes";
+  } else if (Number(preview.timeUnit) === 86400) {
+    timeUnitLabel = "days";
+  }
 
   return (
     <div className="p-6 space-y-6">
@@ -47,9 +102,19 @@ export default async function AssetDetailPage({ params }: Params) {
         <div className="border rounded p-3">
           <h2 className="font-medium mb-2">Schedule</h2>
           <div className="text-xs">
-            <div>Next due: {Number(schedule.nextPaymentDueDate) ? new Date(Number(schedule.nextPaymentDueDate) * 1000).toISOString() : "-"}</div>
+            <div>
+              Next due:{" "}
+              {Number(schedule.nextPaymentDueDate)
+                ? new Date(Number(schedule.nextPaymentDueDate) * 1000).toISOString()
+                : "-"}
+            </div>
             <div>Expected: {schedule.expectedPeriodicPayment.toString()}</div>
-            <div>Maturity: {Number(schedule.expectedMaturityDate) ? new Date(Number(schedule.expectedMaturityDate) * 1000).toISOString() : "-"}</div>
+            <div>
+              Maturity:{" "}
+              {Number(schedule.expectedMaturityDate)
+                ? new Date(Number(schedule.expectedMaturityDate) * 1000).toISOString()
+                : "-"}
+            </div>
           </div>
         </div>
 
@@ -58,7 +123,9 @@ export default async function AssetDetailPage({ params }: Params) {
           <div className="text-xs">
             <div>Cashflow health: {preview.cashflowHealth}</div>
             <div>Asset status: {preview.assetStatus}</div>
-            <div>Days past due: {preview.daysPastDue.toString()}</div>
+            <div>
+              Past due ({timeUnitLabel}): {preview.daysPastDue.toString()}
+            </div>
             <div>Last period index: {preview.periodIndex.toString()}</div>
           </div>
         </div>
@@ -75,19 +142,22 @@ export default async function AssetDetailPage({ params }: Params) {
 
       <section className="space-y-2">
         <h2 className="font-medium">Admin actions (demo)</h2>
-        <form
-          action={`/api/agent/run`}
-          method="post"
-          className="flex gap-2 items-center"
-        >
-          <input type="hidden" name="assetId" value={asset.id} />
-          {/* Next app router doesn't support form->route.ts POST body by default; use fetch from client side in a real implementation.
-              For brevity, link to a small JS button or use useTransition in a client component. */}
-          <p className="text-xs text-gray-400">
-            For now, use POST /api/agent/run with JSON: {"{ assetId: ... }"} from a
-            REST client or a small client component.
-          </p>
-        </form>
+        <div className="flex flex-col items-start gap-4">
+          <button
+            onClick={onRunAgent}
+            disabled={loading}
+            className="px-3 py-1 text-sm bg-gray-700 hover:bg-gray-600 rounded disabled:opacity-50"
+          >
+            {loading ? "Running Agent..." : "Run Agent"}
+          </button>
+
+          {runErr && <pre className="text-xs text-red-400 bg-red-950 p-2 w-full">{runErr}</pre>}
+          {runRes && (
+            <pre className="text-xs text-green-400 bg-green-950 p-2 w-full">
+              {JSON.stringify(runRes, null, 2)}
+            </pre>
+          )}
+        </div>
       </section>
     </div>
   );
