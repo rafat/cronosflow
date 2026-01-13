@@ -7,6 +7,13 @@ import {
   toolTriggerDefaultCheck,
   recordAgentRun,
 } from "./tools";
+import { systemPrompt } from "./prompts";
+import OpenAI from "openai";
+
+// Initialize OpenAI client
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+});
 
 function simplePolicy(state: Awaited<ReturnType<typeof toolSyncState>>): AgentPlan {
   const { schedule, preview, vault } = state;
@@ -14,7 +21,14 @@ function simplePolicy(state: Awaited<ReturnType<typeof toolSyncState>>): AgentPl
   const nowSec = BigInt(Math.floor(Date.now() / 1000));
   const steps = [] as AgentPlan["steps"];
 
-  const due = nowSec >= schedule.nextPaymentDueDate;
+  // Convert bigint to number for comparison for now, assuming values fit.
+  // In a real-world scenario, careful handling of BigInt comparison is needed.
+  const nextPaymentDueDateNum = Number(schedule.nextPaymentDueDate);
+  const nowNum = Number(nowSec);
+  const idleNum = Number(vault.totalIdle);
+  const expectedNum = Number(schedule.expectedPeriodicPayment);
+
+  const due = nowNum >= nextPaymentDueDateNum;
   const idle = vault.totalIdle;
   const expected = schedule.expectedPeriodicPayment;
 
@@ -22,7 +36,10 @@ function simplePolicy(state: Awaited<ReturnType<typeof toolSyncState>>): AgentPl
   if (due && idle < expected) {
     steps.push({
       tool: "createPaymentRequest",
-      args: {},
+      args: {
+        amount: expected.toString(), // Pass as string for bigint
+        dueAt: new Date(nextPaymentDueDateNum * 1000).toISOString(),
+      },
       why: "Payment is due and idle funds are insufficient; need to request tenant/payment via x402.",
     });
   }
@@ -60,11 +77,30 @@ async function generatePlanWithCryptoAgent(
   assetId: string,
   state: Awaited<ReturnType<typeof toolSyncState>>,
 ): Promise<AgentPlan> {
-  // TODO: integrate Crypto.com AI Agent SDK here:
-  //  - pass state as tool input / context
-  //  - let agent propose steps (syncState already executed)
-  //  - validate with AgentPlanSchema
-  return simplePolicy(state);
+  // Pass the state as a string, handling BigInt conversion for the LLM
+  const userMessageContent = `Current asset state for assetId ${assetId}:\n\`\`\`json\n${JSON.stringify(state, (key, value) =>
+    typeof value === 'bigint' ? value.toString() : value
+  )}\n\`\`\``;
+
+  const response = await openai.chat.completions.create({
+    model: "gpt-4o", // or another suitable model
+    messages: [
+      {
+        role: "system",
+        content: systemPrompt,
+      },
+      {
+        role: "user",
+        content: userMessageContent,
+      },
+    ],
+    temperature: 0.7,
+    response_format: { type: "json_object" },
+  });
+
+  const rawPlan = JSON.parse(response.choices[0].message.content || "{}");
+  const plan = AgentPlanSchema.parse(rawPlan);
+  return plan;
 }
 
 export async function runAgentForAsset(assetId: string, mode: "manual" | "cron") {
@@ -82,25 +118,25 @@ export async function runAgentForAsset(assetId: string, mode: "manual" | "cron")
     // Step 3: execute steps
     for (const step of plan.steps) {
       if (step.tool === "createPaymentRequest") {
-        const dueAt = new Date(
-          Number(synced.schedule.nextPaymentDueDate) * 1000,
-        );
+        const { amount, dueAt } = step.args;
+        if (typeof amount !== 'string' || typeof dueAt !== 'string') {
+          throw new Error("Invalid arguments for createPaymentRequest: amount and dueAt must be strings.");
+        }
         const out = await toolCreatePaymentRequest(
           assetId,
-          synced.schedule.expectedPeriodicPayment,
-          dueAt,
+          BigInt(amount), // Convert back to BigInt
+          new Date(dueAt),
         );
         actions.push({ tool: step.tool, args: step.args, output: out });
-      }
-
-      if (step.tool === "commitDistribution") {
+      } else if (step.tool === "commitDistribution") {
         const out = await toolCommitDistribution(assetId);
         actions.push({ tool: step.tool, args: step.args, output: out });
-      }
-
-      if (step.tool === "triggerDefaultCheck") {
+      } else if (step.tool === "triggerDefaultCheck") {
         const out = await toolTriggerDefaultCheck(assetId);
         actions.push({ tool: step.tool, args: step.args, output: out });
+      } else {
+        console.warn(`Unknown tool: ${step.tool}. Skipping.`);
+        actions.push({ tool: step.tool, args: step.args, output: { status: "skipped", reason: "unknown tool" } });
       }
     }
 
@@ -114,10 +150,11 @@ export async function runAgentForAsset(assetId: string, mode: "manual" | "cron")
 
     return { ok: true, plan, actions };
   } catch (e: any) {
+    console.error("Agent run failed:", e);
     await recordAgentRun({
       assetId,
       mode,
-      plan: null,
+      plan: null, // Plan might not have been generated or parsed successfully
       actions,
       result: "FAILED",
       error: e?.message ?? String(e),

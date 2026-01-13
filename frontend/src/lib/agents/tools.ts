@@ -16,6 +16,7 @@ import {
   txCommitDistribution,
 } from "@/src/lib/chain/write";
 import { randomUUID } from "crypto";
+import { x402Client } from "@/src/lib/x402/client";
 
 export async function toolSyncState(assetId: string) {
   const [row] = await db.select().from(assets).where(eq(assets.id, assetId)).limit(1);
@@ -48,11 +49,11 @@ export async function toolSyncState(assetId: string) {
   return { registryState, schedule, preview, vault };
 }
 
-// x402-aware: create payment request (Phase 1: DB record only).
-// Later you plug in Crypto.com x402 facilitator to actually send the payment intent.
+// x402-aware: create payment request
 export async function toolCreatePaymentRequest(assetId: string, amount: bigint, dueAt: Date) {
   const id = randomUUID();
 
+  // Insert initial payment request record in DB
   await db.insert(paymentRequests).values({
     id,
     assetId,
@@ -60,14 +61,30 @@ export async function toolCreatePaymentRequest(assetId: string, amount: bigint, 
     dueAt,
     status: "CREATED",
     reference: `asset-${assetId}-${Date.now()}`,
-    providerPayload: null,
+    providerPayload: null, // Will be updated after x402 call
   });
 
-  // TODO: integrate Crypto.com x402:
-  // - call facilitator to create a payment request for tenant
-  // - update providerPayload + status = "SENT"
+  // Call x402 facilitator to create an actual payment request
+  const x402Response = await x402Client.createPaymentRequest({
+    assetId,
+    amount,
+    dueAt,
+    reference: id, // Use internal ID as reference for x402
+  });
 
-  return { paymentRequestId: id, amount: amount.toString(), dueAt: dueAt.toISOString() };
+  // Update DB record with x402 response and SENT status
+  await db.update(paymentRequests).set({
+    status: "SENT",
+    providerPayload: x402Response,
+    updatedAt: new Date(),
+  }).where(eq(paymentRequests.id, id));
+
+  return {
+    paymentRequestId: id,
+    amount: amount.toString(),
+    dueAt: dueAt.toISOString(),
+    x402Response,
+  };
 }
 
 export async function toolCommitDistribution(assetId: string) {
