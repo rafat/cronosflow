@@ -10,6 +10,9 @@ export async function deployContract<TArgs extends any[]>({
   bytecode: `0x${string}`;
   args?: TArgs;
 }) {
+  if (!walletClient) {
+    throw new Error("Wallet client is not available. Check AGENT_PRIVATE_KEY environment variable.");
+  }
   const hash = await walletClient.deployContract({
     abi,
     bytecode,

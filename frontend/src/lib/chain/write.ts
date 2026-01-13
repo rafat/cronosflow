@@ -3,6 +3,9 @@ import { walletClient, publicClient } from "./clients";
 import { Registry, Vault, RentalLogic } from "@/src/lib/contracts";
 
 export async function txCheckAndTriggerDefault(registry: `0x${string}`, assetId: bigint) {
+  if (!walletClient) {
+    throw new Error("Wallet client is not available. Check AGENT_PRIVATE_KEY environment variable.");
+  }
   const hash = await walletClient.writeContract({
     address: registry,
     abi: Registry.abi,
@@ -17,6 +20,9 @@ export async function txCommitDistribution(
   vault: `0x${string}`,
   amount: bigint,
 ) {
+  if (!walletClient) {
+    throw new Error("Wallet client is not available. Check AGENT_PRIVATE_KEY environment variable.");
+  }
   const hash = await walletClient.writeContract({
     address: vault,
     abi: Vault.abi,
@@ -37,6 +43,9 @@ export async function txSimulatePaymentAndDistribution(params: {
   from: `0x${string}`;
   amount: bigint;
 }) {
+  if (!walletClient) {
+    throw new Error("Wallet client is not available. Check AGENT_PRIVATE_KEY environment variable.");
+  }
   const { vault, logic, registry, assetId, from, amount } = params;
 
   // 1) depositRevenue(from, amount)

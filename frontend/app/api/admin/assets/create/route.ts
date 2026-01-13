@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { encodeAbiParameters, parseAbiParameters, parseEventLogs } from "viem";
-import { publicClient, walletClient, agentAccount } from "@/src/lib/chain/clients";
+import { publicClient, walletClient, getAgentAddress } from "@/src/lib/chain/clients";
 import { deployContract } from "@/src/lib/chain/deploy";
 import { Registry, RentalLogic, Vault, ShareToken } from "@/src/lib/contracts";
 
@@ -34,6 +34,10 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
+    if (!walletClient) {
+      throw new Error("Wallet client is not available. Check AGENT_PRIVATE_KEY environment variable.");
+    }
+
     const body = CreateSchema.parse(await req.json());
 
     const registryAddress = process.env.REGISTRY_ADDRESS as `0x${string}` | undefined;
@@ -43,7 +47,7 @@ export async function POST(req: Request) {
       (body.paymentToken ?? process.env.TESTNET_USDC_ADDRESS) as `0x${string}` | undefined;
     if (!paymentToken) throw new Error("TESTNET_USDC_ADDRESS missing (or provide paymentToken)");
 
-    const originator = (body.originator ?? agentAccount.address) as `0x${string}`;
+    const originator = (body.originator ?? getAgentAddress()) as `0x${string}`;
 
     // --- Time & Money Conversions ---
     const rent = BigInt(Math.floor(Number(body.rentAmount))) * BigInt(10) ** BigInt(18);
@@ -116,7 +120,7 @@ export async function POST(req: Request) {
       address: vaultDeploy.address,
       abi: Vault.abi,
       functionName: "initialize",
-      args: [agentAccount.address, logicDeploy.address, paymentToken, registryAddress, onchainAssetId],
+      args: [getAgentAddress(), logicDeploy.address, paymentToken, registryAddress, onchainAssetId],
     });
     await publicClient.waitForTransactionReceipt({ hash: vaultInitHash });
 
